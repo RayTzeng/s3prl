@@ -62,3 +62,11 @@ def hubert_large_ll60k(refresh=False, *args, **kwargs):
     """
     kwargs["ckpt"] = "https://dl.fbaipublicfiles.com/hubert/hubert_large_ll60k.pt"
     return hubert_url(refresh=refresh, *args, **kwargs)
+
+def hubert_xtralarge_ll60k(refresh=False, *args, **kwargs):
+    """
+    The Extra-Large model
+        refresh (bool): whether to download ckpt/config again if existed
+    """
+    kwargs["ckpt"] = "https://dl.fbaipublicfiles.com/hubert/hubert_xtralarge_ll60k.pt"
+    return hubert_url(refresh=refresh, *args, **kwargs)
