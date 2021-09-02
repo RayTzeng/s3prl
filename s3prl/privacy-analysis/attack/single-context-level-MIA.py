@@ -14,7 +14,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SPEAKER_CHOICE_SIZE = 120
+SPEAKER_CHOICE_SIZE = 10
 random.seed(57)
 
 
@@ -44,13 +44,14 @@ def main(args):
                 for feature_path in glob.glob(os.path.join(chapter, f"{args.model}-*")):
                     feature = np.array(
                         torch.load(feature_path).detach().cpu().squeeze()
-                    ).mean(axis=0)
+                    )
                     sim = cosine_similarity(feature)
                     sim = sim[np.triu_indices(len(sim), k=1)]
                     context_level_sim.append(np.mean(sim))
 
             prefix.append(len(context_level_sim))
             colors.append(plot_color)
+
     num_seen_uttr = prefix[-1]
 
     # unseen data
@@ -66,7 +67,7 @@ def main(args):
                 for feature_path in glob.glob(os.path.join(chapter, f"{args.model}-*")):
                     feature = np.array(
                         torch.load(feature_path).detach().cpu().squeeze()
-                    ).mean(axis=0)
+                    )
                     sim = cosine_similarity(feature)
                     sim = sim[np.triu_indices(len(sim), k=1)]
                     context_level_sim.append(np.mean(sim))
@@ -76,6 +77,7 @@ def main(args):
 
     num_unseen_uttr = prefix[-1] - num_seen_uttr
 
+    print("a")
     mean_context_level_sim = [
         np.mean(context_level_sim[prefix[i] : prefix[i + 1]])
         for i in range(len(prefix) - 1)
@@ -96,6 +98,8 @@ def main(args):
     high = max(context_level_sim)
     plt.ylim([low - 0.25 * (high - low), high + 0.25 * (high - low)])
 
+    print("b")
+
     x = [
         1,
         SPEAKER_CHOICE_SIZE + 1,
@@ -112,7 +116,9 @@ def main(args):
     )
     plt.xticks(x, ticks)
     plt.ylabel("Average similarity")
-    plt.title("Pairwise-context-level similarity of {}".format(args.model))
+    plt.title("Intra-context-level similarity of {}".format(args.model))
+
+    print("c")
 
     plt.plot(
         [0, len(mean_context_level_sim) + 1],
@@ -122,7 +128,7 @@ def main(args):
     )
     plt.plot(
         [0, len(mean_context_level_sim) + 1],
-        [np.mean(mean_context_level_sim[num_seen_uttr:]) for _ in range(2)],
+        [np.mean(context_level_sim[num_seen_uttr:]) for _ in range(2)],
         ls="--",
         color="red",
     )
