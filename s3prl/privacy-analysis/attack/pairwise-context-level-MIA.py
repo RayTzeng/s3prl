@@ -14,7 +14,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHOICE_SIZE = 120
+SPEAKER_CHOICE_SIZE = 120
+UTTERANCE_CHOICE_SIZE = 100
 random.seed(57)
 
 
@@ -28,100 +29,142 @@ def main(args):
         os.path.join(args.base_path, split) for split in unseen_splits
     ]
 
-    intra_speaker_sim_mean = []
+    context_level_sim = []
     colors = []
 
     # seen data
     for split_path, plot_color in zip(seen_split_pathes, seen_plot_color):
         all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.choices(all_speakers, k=CHOICE_SIZE)
+        analyze_speakers = random.choices(all_speakers, k=SPEAKER_CHOICE_SIZE)
         for speaker in tqdm(analyze_speakers):
 
-            # calculate intra speaker similarity
+            # calculate pairwise-context-level similarity
 
             speaker_features = []
             for chapter in glob.glob(os.path.join(speaker, "*")):
                 for feature_path in glob.glob(os.path.join(chapter, f"{args.model}-*")):
-                    feature = torch.load(feature_path).detach().cpu()
-                    feature = feature.squeeze()
-                    speaker_features.append(np.array(feature).mean(axis=0))
+                    feature = np.array(
+                        torch.load(feature_path).detach().cpu().squeeze()
+                    ).mean(axis=0)
+                    speaker_features.append(feature)
 
-            sim = cosine_similarity(speaker_features)
-            sim = sim[np.triu_indices(len(sim), k=1)]
-            intra_speaker_sim_mean.append(np.mean(sim))
+            for _ in range(UTTERANCE_CHOICE_SIZE):
+                feature_pair = random.choices(speaker_features, k=2)
+                sim = cosine_similarity(feature_pair)
+                sim = sim[np.triu_indices(len(sim), k=1)]
+                context_level_sim.append(np.mean(sim))
+
             colors.append(plot_color)
 
     # unseen data
     N = len(unseen_splits)
     for split_path, plot_color in zip(unseen_split_pathes, unseen_plot_color):
         all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.choices(all_speakers, k=int(CHOICE_SIZE / N))
+        analyze_speakers = random.choices(all_speakers, k=int(SPEAKER_CHOICE_SIZE / N))
         for speaker in tqdm(analyze_speakers):
 
-            # calculate intra speaker similarity
+            # calculate pairwise-context-level similarity
 
             speaker_features = []
             for chapter in glob.glob(os.path.join(speaker, "*")):
                 for feature_path in glob.glob(os.path.join(chapter, f"{args.model}-*")):
-                    feature = torch.load(feature_path).detach().cpu()
-                    feature = feature.squeeze()
-                    speaker_features.append(np.array(feature).mean(axis=0))
+                    feature = np.array(
+                        torch.load(feature_path).detach().cpu().squeeze()
+                    ).mean(axis=0)
+                    speaker_features.append(feature)
 
-            sim = cosine_similarity(speaker_features)
-            sim = sim[np.triu_indices(len(sim), k=1)]
-            intra_speaker_sim_mean.append(np.mean(sim))
+            for _ in range(UTTERANCE_CHOICE_SIZE):
+                feature_pair = random.choices(speaker_features, k=2)
+                sim = cosine_similarity(feature_pair)
+                sim = sim[np.triu_indices(len(sim), k=1)]
+                context_level_sim.append(np.mean(sim))
+
             colors.append(plot_color)
+
+    mean_context_level_sim = [
+        np.mean(
+            context_level_sim[
+                i * UTTERANCE_CHOICE_SIZE : (i + 1) * UTTERANCE_CHOICE_SIZE
+            ]
+        )
+        for i in range(SPEAKER_CHOICE_SIZE * 2)
+    ]
+    max_context_level_sim = [
+        max(
+            context_level_sim[
+                i * UTTERANCE_CHOICE_SIZE : (i + 1) * UTTERANCE_CHOICE_SIZE
+            ]
+        )
+        - mean_context_level_sim[i]
+        for i in range(SPEAKER_CHOICE_SIZE * 2)
+    ]
+    min_context_level_sim = [
+        mean_context_level_sim[i]
+        - min(
+            context_level_sim[
+                i * UTTERANCE_CHOICE_SIZE : (i + 1) * UTTERANCE_CHOICE_SIZE
+            ]
+        )
+        for i in range(SPEAKER_CHOICE_SIZE * 2)
+    ]
 
     plt.figure(figsize=(80, 40))
     plt.rcParams.update({"font.size": 40})
 
-    low = min(intra_speaker_sim_mean)
-    high = max(intra_speaker_sim_mean)
+    low = min(context_level_sim)
+    high = max(context_level_sim)
     plt.ylim([low - 0.25 * (high - low), high + 0.25 * (high - low)])
 
     x = [
         1,
-        CHOICE_SIZE + 1,
-        CHOICE_SIZE * ((N + 1) / N) + 1,
-        CHOICE_SIZE * ((N + 2) / N) + 1,
-        CHOICE_SIZE * ((N + 3) / N) + 1,
+        SPEAKER_CHOICE_SIZE + 1,
+        SPEAKER_CHOICE_SIZE * ((N + 1) / N) + 1,
+        SPEAKER_CHOICE_SIZE * ((N + 2) / N) + 1,
+        SPEAKER_CHOICE_SIZE * ((N + 3) / N) + 1,
     ]
     ticks = np.concatenate((seen_splits, unseen_splits))
     plt.bar(
-        range(1, len(intra_speaker_sim_mean) + 1), intra_speaker_sim_mean, color=colors
+        range(1, len(mean_context_level_sim) + 1),
+        mean_context_level_sim,
+        yerr=[min_context_level_sim, max_context_level_sim],
+        color=colors,
     )
     plt.xticks(x, ticks)
     plt.ylabel("Average similarity")
-    plt.title("speaker similarity of {}".format(args.model))
+    plt.title("Pairwise-context-level similarity of {}".format(args.model))
 
     plt.plot(
-        [0, len(intra_speaker_sim_mean) + 1],
-        [np.mean(intra_speaker_sim_mean[:CHOICE_SIZE]) for _ in range(2)],
+        [0, len(mean_context_level_sim) + 1],
+        [np.mean(mean_context_level_sim[:SPEAKER_CHOICE_SIZE]) for _ in range(2)],
         ls="--",
         color="blue",
     )
     plt.plot(
-        [0, len(intra_speaker_sim_mean) + 1],
-        [np.mean(intra_speaker_sim_mean[CHOICE_SIZE:]) for _ in range(2)],
+        [0, len(mean_context_level_sim) + 1],
+        [np.mean(mean_context_level_sim[SPEAKER_CHOICE_SIZE:]) for _ in range(2)],
         ls="--",
         color="red",
     )
     plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-mean-speaker-sim-bar-plot.png")
+        os.path.join(
+            args.output_path, f"{args.model}-pairwise-context-sim-bar-plot.png"
+        )
     )
 
     # apply attack
     percentile_choice = [50, 60, 70, 80, 90]
 
-    seen_spkr_sim = intra_speaker_sim_mean[:CHOICE_SIZE]
-    unseen_spkr_sim = intra_speaker_sim_mean[CHOICE_SIZE:]
+    seen_spkr_sim = context_level_sim[: SPEAKER_CHOICE_SIZE * UTTERANCE_CHOICE_SIZE]
+    unseen_spkr_sim = context_level_sim[SPEAKER_CHOICE_SIZE * UTTERANCE_CHOICE_SIZE :]
     recall_by_percentile = []
     precision_by_percentile = []
     accuracy_by_percentile = []
 
     for percentile in percentile_choice:
         sorted_unseen_spkr_sim = sorted(unseen_spkr_sim)
-        threshold = sorted_unseen_spkr_sim[math.floor(CHOICE_SIZE * percentile / 100)]
+        threshold = sorted_unseen_spkr_sim[
+            math.floor(SPEAKER_CHOICE_SIZE * UTTERANCE_CHOICE_SIZE * percentile / 100)
+        ]
         TP = len([sim for sim in seen_spkr_sim if sim > threshold])
         FN = len([sim for sim in seen_spkr_sim if sim <= threshold])
         FP = len([sim for sim in unseen_spkr_sim if sim > threshold])
