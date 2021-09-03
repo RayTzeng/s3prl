@@ -128,7 +128,7 @@ def main(args):
         color="red",
     )
     plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-single-context-sim-bar-plot.png")
+        os.path.join(args.output_path, f"{args.model}-single-context-v2-sim-bar-plot.png")
     )
 
     # apply attack
