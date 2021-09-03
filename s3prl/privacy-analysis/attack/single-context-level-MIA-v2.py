@@ -132,7 +132,7 @@ def main(args):
     )
 
     # apply attack
-    percentile_choice = [50, 60, 70, 80, 90]
+    percentile_choice = [10, 20, 30, 40, 50]
 
     seen_spkr_sim = context_level_sim[:num_seen_uttr]
     unseen_spkr_sim = context_level_sim[num_seen_uttr:]
@@ -145,10 +145,10 @@ def main(args):
         threshold = sorted_unseen_spkr_sim[
             math.floor(num_unseen_uttr * percentile / 100)
         ]
-        TP = len([sim for sim in seen_spkr_sim if sim > threshold])
-        FN = len([sim for sim in seen_spkr_sim if sim <= threshold])
-        FP = len([sim for sim in unseen_spkr_sim if sim > threshold])
-        TN = len([sim for sim in unseen_spkr_sim if sim <= threshold])
+        TP = len([sim for sim in seen_spkr_sim if sim < threshold])
+        FN = len([sim for sim in seen_spkr_sim if sim >= threshold])
+        FP = len([sim for sim in unseen_spkr_sim if sim < threshold])
+        TN = len([sim for sim in unseen_spkr_sim if sim >= threshold])
 
         recall = TP / (TP + FN)
         precision = TP / (TP + FP)
