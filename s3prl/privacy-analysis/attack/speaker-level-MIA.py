@@ -14,11 +14,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHOICE_SIZE = 120
-random.seed(57)
 
 
 def main(args):
+    random.seed(args.seed)
+    CHOICE_SIZE = args.speaker_choice_size
+
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
     seen_plot_color = ["blue"]
@@ -153,6 +154,10 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", help="directory to save the analysis results")
     parser.add_argument(
         "--model", help="which self-supervised model you used to extract features"
+    )
+    parser.add_argument("--seed", type=int, default=57, help="random seed")
+    parser.add_argument(
+        "--speaker_choice_size", type=int, default=120, help="how many speaker to pick"
     )
     args = parser.parse_args()
 

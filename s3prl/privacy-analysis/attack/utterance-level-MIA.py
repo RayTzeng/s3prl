@@ -14,11 +14,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SPEAKER_CHOICE_SIZE = 10
-random.seed(57)
 
 
 def main(args):
+    random.seed(args.seed)
+    SPEAKER_CHOICE_SIZE = args.speaker_choice_size
+
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
     seen_plot_color = ["blue"]
@@ -77,7 +78,6 @@ def main(args):
 
     num_unseen_uttr = prefix[-1] - num_seen_uttr
 
-    print("a")
     mean_context_level_sim = [
         np.mean(context_level_sim[prefix[i] : prefix[i + 1]])
         for i in range(len(prefix) - 1)
@@ -98,8 +98,6 @@ def main(args):
     high = max(context_level_sim)
     plt.ylim([low - 0.25 * (high - low), high + 0.25 * (high - low)])
 
-    print("b")
-
     x = [
         1,
         SPEAKER_CHOICE_SIZE + 1,
@@ -118,8 +116,6 @@ def main(args):
     plt.ylabel("Average similarity")
     plt.title("Intra-context-level similarity of {}".format(args.model))
 
-    print("c")
-
     plt.plot(
         [0, len(mean_context_level_sim) + 1],
         [np.mean(context_level_sim[:num_seen_uttr]) for _ in range(2)],
@@ -133,11 +129,13 @@ def main(args):
         color="red",
     )
     plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-single-context-sim-bar-plot.png")
+        os.path.join(
+            args.output_path, f"{args.model}-single-context-v2-sim-bar-plot.png"
+        )
     )
 
     # apply attack
-    percentile_choice = [50, 60, 70, 80, 90]
+    percentile_choice = [10, 20, 30, 40, 50]
 
     seen_spkr_sim = context_level_sim[:num_seen_uttr]
     unseen_spkr_sim = context_level_sim[num_seen_uttr:]
@@ -150,10 +148,10 @@ def main(args):
         threshold = sorted_unseen_spkr_sim[
             math.floor(num_unseen_uttr * percentile / 100)
         ]
-        TP = len([sim for sim in seen_spkr_sim if sim > threshold])
-        FN = len([sim for sim in seen_spkr_sim if sim <= threshold])
-        FP = len([sim for sim in unseen_spkr_sim if sim > threshold])
-        TN = len([sim for sim in unseen_spkr_sim if sim <= threshold])
+        TP = len([sim for sim in seen_spkr_sim if sim < threshold])
+        FN = len([sim for sim in seen_spkr_sim if sim >= threshold])
+        FP = len([sim for sim in unseen_spkr_sim if sim < threshold])
+        TN = len([sim for sim in unseen_spkr_sim if sim >= threshold])
 
         recall = TP / (TP + FN)
         precision = TP / (TP + FP)
@@ -181,6 +179,10 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", help="directory to save the analysis results")
     parser.add_argument(
         "--model", help="which self-supervised model you used to extract features"
+    )
+    parser.add_argument("--seed", type=int, default=57, help="random seed")
+    parser.add_argument(
+        "--speaker_choice_size", type=int, default=120, help="how many speaker to pick"
     )
     args = parser.parse_args()
 
