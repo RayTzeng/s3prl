@@ -7,6 +7,7 @@ import time
 
 import IPython
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
@@ -134,7 +135,7 @@ def main(args):
         color="red",
     )
     plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-single-context-sim-bar-plot.png")
+        os.path.join(args.output_path, f"{args.model}-utterance-level-above-threshold-sim-bar-plot.png")
     )
 
     # apply attack
@@ -172,6 +173,12 @@ def main(args):
     print(f"precision:  ", " | ".join(f"{num:.4f}" for num in precision_by_percentile))
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
+
+    df = pd.DataFrame({'percentile': percentile_choice,
+                        'recall': recall_by_percentile,
+                        'precision': precision_by_percentile,
+                        'accuracy': accuracy_by_percentile})
+    df.to_csv(os.path.join(args.output_path, f"{args.model}-utterance-level-above-threshold-attack-result.csv"), index=False)
 
 
 if __name__ == "__main__":
