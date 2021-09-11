@@ -135,7 +135,7 @@ def main(args):
     )
 
     # apply attack
-    percentile_choice = [10, 20, 30, 40, 50]
+    percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 
     seen_spkr_sim = context_level_sim[:num_seen_uttr]
     unseen_spkr_sim = context_level_sim[num_seen_uttr:]
