@@ -112,7 +112,7 @@ def main(args):
     )
 
     # apply attack
-    percentile_choice = [50, 60, 70, 80, 90]
+    percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 
     seen_spkr_sim = intra_speaker_sim_mean[:CHOICE_SIZE]
     unseen_spkr_sim = intra_speaker_sim_mean[CHOICE_SIZE:]
