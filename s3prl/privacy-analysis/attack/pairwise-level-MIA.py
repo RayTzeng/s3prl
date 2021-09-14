@@ -37,7 +37,7 @@ def main(args):
     # seen data
     for split_path, plot_color in zip(seen_split_pathes, seen_plot_color):
         all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.choices(all_speakers, k=SPEAKER_CHOICE_SIZE)
+        analyze_speakers = random.sample(all_speakers, k=SPEAKER_CHOICE_SIZE)
         for speaker in tqdm(analyze_speakers):
 
             # calculate pairwise-context-level similarity
@@ -51,7 +51,7 @@ def main(args):
                     speaker_features.append(feature)
 
             for _ in range(UTTERANCE_CHOICE_SIZE):
-                feature_pair = random.choices(speaker_features, k=2)
+                feature_pair = random.sample(speaker_features, k=2)
                 sim = cosine_similarity(feature_pair)
                 sim = sim[np.triu_indices(len(sim), k=1)]
                 context_level_sim.append(np.mean(sim))
@@ -62,7 +62,7 @@ def main(args):
     N = len(unseen_splits)
     for split_path, plot_color in zip(unseen_split_pathes, unseen_plot_color):
         all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.choices(all_speakers, k=int(SPEAKER_CHOICE_SIZE / N))
+        analyze_speakers = random.sample(all_speakers, k=int(SPEAKER_CHOICE_SIZE / N))
         for speaker in tqdm(analyze_speakers):
 
             # calculate pairwise-context-level similarity
@@ -76,7 +76,7 @@ def main(args):
                     speaker_features.append(feature)
 
             for _ in range(UTTERANCE_CHOICE_SIZE):
-                feature_pair = random.choices(speaker_features, k=2)
+                feature_pair = random.sample(speaker_features, k=2)
                 sim = cosine_similarity(feature_pair)
                 sim = sim[np.triu_indices(len(sim), k=1)]
                 context_level_sim.append(np.mean(sim))

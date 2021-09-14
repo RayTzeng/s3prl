@@ -7,7 +7,6 @@ import time
 
 import IPython
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
@@ -15,12 +14,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+SPEAKER_CHOICE_SIZE = 20
+random.seed(57)
 
 
 def main(args):
-    random.seed(args.seed)
-    SPEAKER_CHOICE_SIZE = args.speaker_choice_size
-
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
     seen_plot_color = ["blue"]
@@ -30,14 +28,14 @@ def main(args):
         os.path.join(args.base_path, split) for split in unseen_splits
     ]
 
-    context_level_sim = []
+    context_level_diversity = []
     prefix = [0]
     colors = []
 
     # seen data
     for split_path, plot_color in zip(seen_split_pathes, seen_plot_color):
         all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.sample(all_speakers, k=SPEAKER_CHOICE_SIZE)
+        analyze_speakers = random.choices(all_speakers, k=SPEAKER_CHOICE_SIZE)
         for speaker in tqdm(analyze_speakers):
 
             # calculate pairwise-context-level similarity
@@ -49,9 +47,10 @@ def main(args):
                     )
                     sim = cosine_similarity(feature)
                     sim = sim[np.triu_indices(len(sim), k=1)]
-                    context_level_sim.append(np.mean(sim))
+                    div = sim.std()
+                    context_level_diversity.append(div)
 
-            prefix.append(len(context_level_sim))
+            prefix.append(len(context_level_diversity))
             colors.append(plot_color)
 
     num_seen_uttr = prefix[-1]
@@ -60,7 +59,7 @@ def main(args):
     N = len(unseen_splits)
     for split_path, plot_color in zip(unseen_split_pathes, unseen_plot_color):
         all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.sample(all_speakers, k=int(SPEAKER_CHOICE_SIZE / N))
+        analyze_speakers = random.choices(all_speakers, k=int(SPEAKER_CHOICE_SIZE / N))
         for speaker in tqdm(analyze_speakers):
 
             # calculate pairwise-context-level similarity
@@ -72,31 +71,34 @@ def main(args):
                     )
                     sim = cosine_similarity(feature)
                     sim = sim[np.triu_indices(len(sim), k=1)]
-                    context_level_sim.append(np.mean(sim))
+                    div = sim.std()
+                    context_level_diversity.append(div)
 
-            prefix.append(len(context_level_sim))
+            prefix.append(len(context_level_diversity))
             colors.append(plot_color)
 
     num_unseen_uttr = prefix[-1] - num_seen_uttr
 
-    mean_context_level_sim = [
-        np.mean(context_level_sim[prefix[i] : prefix[i + 1]])
+    mean_context_level_div = [
+        np.mean(context_level_diversity[prefix[i] : prefix[i + 1]])
         for i in range(len(prefix) - 1)
     ]
-    max_context_level_sim = [
-        max(context_level_sim[prefix[i] : prefix[i + 1]]) - mean_context_level_sim[i]
+    max_context_level_div = [
+        max(context_level_diversity[prefix[i] : prefix[i + 1]])
+        - mean_context_level_div[i]
         for i in range(len(prefix) - 1)
     ]
-    min_context_level_sim = [
-        mean_context_level_sim[i] - min(context_level_sim[prefix[i] : prefix[i + 1]])
+    min_context_level_div = [
+        mean_context_level_div[i]
+        - min(context_level_diversity[prefix[i] : prefix[i + 1]])
         for i in range(len(prefix) - 1)
     ]
 
     plt.figure(figsize=(80, 40))
     plt.rcParams.update({"font.size": 40})
 
-    low = min(context_level_sim)
-    high = max(context_level_sim)
+    low = min(context_level_diversity)
+    high = max(context_level_diversity)
     plt.ylim([low - 0.25 * (high - low), high + 0.25 * (high - low)])
 
     x = [
@@ -108,51 +110,51 @@ def main(args):
     ]
     ticks = np.concatenate((seen_splits, unseen_splits))
     plt.bar(
-        range(1, len(mean_context_level_sim) + 1),
-        mean_context_level_sim,
-        yerr=[min_context_level_sim, max_context_level_sim],
+        range(1, len(mean_context_level_div) + 1),
+        mean_context_level_div,
+        yerr=[min_context_level_div, max_context_level_div],
         color=colors,
     )
     plt.xticks(x, ticks)
-    plt.ylabel("Average similarity")
-    plt.title("Intra-context-level similarity of {}".format(args.model))
+    plt.ylabel("Average Standard Deviation")
+    plt.title("Context-level diversity of {}".format(args.model))
 
     plt.plot(
-        [0, len(mean_context_level_sim) + 1],
-        [np.mean(context_level_sim[:num_seen_uttr]) for _ in range(2)],
+        [0, len(mean_context_level_div) + 1],
+        [np.mean(context_level_diversity[:num_seen_uttr]) for _ in range(2)],
         ls="--",
         color="blue",
     )
     plt.plot(
-        [0, len(mean_context_level_sim) + 1],
-        [np.mean(context_level_sim[num_seen_uttr:]) for _ in range(2)],
+        [0, len(mean_context_level_div) + 1],
+        [np.mean(context_level_diversity[num_seen_uttr:]) for _ in range(2)],
         ls="--",
         color="red",
     )
     plt.savefig(
         os.path.join(
-            args.output_path, f"{args.model}-utterance-level-sim-bar-plot.png"
+            args.output_path, f"{args.model}-single-context-diversity-bar-plot.png"
         )
     )
 
     # apply attack
-    percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
+    percentile_choice = [50, 60, 70, 80, 90]
 
-    seen_spkr_sim = context_level_sim[:num_seen_uttr]
-    unseen_spkr_sim = context_level_sim[num_seen_uttr:]
+    seen_spkr_div = context_level_diversity[:num_seen_uttr]
+    unseen_spkr_div = context_level_diversity[num_seen_uttr:]
     recall_by_percentile = []
     precision_by_percentile = []
     accuracy_by_percentile = []
 
     for percentile in percentile_choice:
-        sorted_unseen_spkr_sim = sorted(unseen_spkr_sim)
-        threshold = sorted_unseen_spkr_sim[
+        sorted_unseen_spkr_div = sorted(unseen_spkr_div)
+        threshold = sorted_unseen_spkr_div[
             math.floor(num_unseen_uttr * percentile / 100)
         ]
-        TP = len([sim for sim in seen_spkr_sim if sim < threshold])
-        FN = len([sim for sim in seen_spkr_sim if sim >= threshold])
-        FP = len([sim for sim in unseen_spkr_sim if sim < threshold])
-        TN = len([sim for sim in unseen_spkr_sim if sim >= threshold])
+        TP = len([div for div in seen_spkr_div if div > threshold])
+        FN = len([div for div in seen_spkr_div if div <= threshold])
+        FP = len([div for div in unseen_spkr_div if div > threshold])
+        TN = len([div for div in unseen_spkr_div if div <= threshold])
 
         recall = TP / (TP + FN)
         precision = TP / (TP + FP)
@@ -171,12 +173,6 @@ def main(args):
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
-    df = pd.DataFrame({'percentile': percentile_choice,
-                        'recall': recall_by_percentile,
-                        'precision': precision_by_percentile,
-                        'accuracy': accuracy_by_percentile})
-    df.to_csv(os.path.join(args.output_path, f"{args.model}-utterance-level-attack-result.csv"), index=False)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -186,10 +182,6 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", help="directory to save the analysis results")
     parser.add_argument(
         "--model", help="which self-supervised model you used to extract features"
-    )
-    parser.add_argument("--seed", type=int, default=57, help="random seed")
-    parser.add_argument(
-        "--speaker_choice_size", type=int, default=120, help="how many speaker to pick"
     )
     args = parser.parse_args()
 
