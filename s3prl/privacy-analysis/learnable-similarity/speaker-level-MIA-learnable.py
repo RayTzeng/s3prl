@@ -51,11 +51,14 @@ def main(args):
             speaker_sim = []
             features_x = []
             features_y = []
+            features = []
             for chapter in glob.glob(os.path.join(speaker, "*")):
                 feature_pathes = glob.glob(os.path.join(chapter, f"{args.model}-*"))
+                for i in range(len(feature_pathes)):
+                    features.append(torch.load(feature_pathes[i]).squeeze().to(device))
                 for i in range(len(feature_pathes) - 1):
-                    features_x.append(torch.load(feature_pathes[i]).detach().squeeze().cpu().to(device))
-                    features_y.append(torch.load(feature_pathes[i+1]).detach().squeeze().cpu().to(device))
+                    features_x.append(features[i])
+                    features_y.append(features[i+1])
 
             with torch.no_grad():   
                 sim = sim_predictor(features_x, features_y)
@@ -76,11 +79,14 @@ def main(args):
             speaker_sim = []
             features_x = []
             features_y = []
+            features = []
             for chapter in glob.glob(os.path.join(speaker, "*")):
                 feature_pathes = glob.glob(os.path.join(chapter, f"{args.model}-*"))
+                for i in range(len(feature_pathes)):
+                    features.append(torch.load(feature_pathes[i]).squeeze().to(device))
                 for i in range(len(feature_pathes) - 1):
-                    features_x.append(torch.load(feature_pathes[i]).detach().squeeze().cpu().to(device))
-                    features_y.append(torch.load(feature_pathes[i+1]).detach().squeeze().cpu().to(device))
+                    features_x.append(features[i])
+                    features_y.append(features[i+1])
 
             with torch.no_grad():   
                 sim = sim_predictor(features_x, features_y)
