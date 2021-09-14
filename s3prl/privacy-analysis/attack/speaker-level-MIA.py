@@ -165,7 +165,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=57, help="random seed")
     parser.add_argument(
-        "--speaker_choice_size", type=int, default=120, help="how many speaker to pick"
+        "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
     )
     args = parser.parse_args()
 

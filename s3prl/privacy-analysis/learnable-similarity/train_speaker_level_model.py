@@ -114,10 +114,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=57, help="random seed")
     parser.add_argument(
-        "--speaker_choice_size", type=int, default=120, help="how many speaker to pick"
+        "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
     )
     parser.add_argument(
-        "--auxiliary_data_percentage", type=int, default=10, help="how many percentage of data is auxiliary data"
+        "--auxiliary_data_percentage", type=int, default=12, help="how many percentage of data is auxiliary data"
     )
     parser.add_argument(
         "--train_batch_size", type=int, default=32, help="training batch size"
