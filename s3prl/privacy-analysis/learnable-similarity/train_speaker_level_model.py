@@ -85,11 +85,11 @@ def main(args):
     train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=train_dataset.collate_fn)
     eval_dataloader = DataLoader(eval_dataset, batch_size=args.eval_batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=eval_dataset.collate_fn)
 
-    # upstream = torch.hub.load('s3prl/s3prl', args.model).to(device)
-    # wavs = [torch.zeros(160000, dtype=torch.float).to(device) for _ in range(1)]
-    # feature = upstream(wavs)['last_hidden_state']
-    # input_dim = feature[0].shape[1]
-    input_dim = 768
+    upstream = torch.hub.load('s3prl/s3prl', args.model).to(device)
+    wavs = [torch.zeros(160000, dtype=torch.float).to(device) for _ in range(1)]
+    feature = upstream(wavs)['last_hidden_state']
+    input_dim = feature[0].shape[1]
+    # input_dim = 768
     print(f"input dimension: {input_dim}")
 
     model = SpeakerLevelModel(input_dim).to(device)

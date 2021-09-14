@@ -32,8 +32,9 @@ def main(args):
         os.path.join(args.base_path, split) for split in unseen_splits
     ]
 
-    sim_predictor = SpeakerLevelModel(input_dim=768).to(device)
-    sim_predictor.load_state_dict(torch.load("/home/raytz/Disk/learnable-similarity-hubert-seed-57.pt"))
+    ckpt = torch.load(args.sim_model_path)
+    sim_predictor = SpeakerLevelModel(ckpt['linear.weight']).to(device)
+    sim_predictor.load_state_dict(ckpt)
     sim_predictor.eval()
 
     intra_speaker_sim_mean = []
@@ -174,6 +175,7 @@ if __name__ == "__main__":
         "--base_path", help="directory of feature of LibriSpeech dataset"
     )
     parser.add_argument("--output_path", help="directory to save the analysis results")
+    parser.add_argument("--sim_model_path", help="path of similarity model")
     parser.add_argument(
         "--model", help="which self-supervised model you used to extract features"
     )
