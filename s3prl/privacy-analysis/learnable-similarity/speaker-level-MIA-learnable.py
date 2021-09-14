@@ -33,7 +33,7 @@ def main(args):
     ]
 
     ckpt = torch.load(args.sim_model_path)
-    sim_predictor = SpeakerLevelModel(ckpt['linear.weight']).to(device)
+    sim_predictor = SpeakerLevelModel(ckpt['linear.weight'].shape[0]).to(device)
     sim_predictor.load_state_dict(ckpt)
     sim_predictor.eval()
 

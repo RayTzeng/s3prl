@@ -179,7 +179,7 @@ if __name__ == "__main__":
         "--n_epochs", type=int, default=30, help="training epoch"
     )
     parser.add_argument(
-        "--num_workers", type=int, default=8, help="number of workers"
+        "--num_workers", type=int, default=2, help="number of workers"
     )
     args = parser.parse_args()
 
