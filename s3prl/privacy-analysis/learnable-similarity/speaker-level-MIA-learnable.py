@@ -51,12 +51,13 @@ def main(args):
             speaker_sim = []
             features_x = []
             features_y = []
-            features = []
+            
             for chapter in glob.glob(os.path.join(speaker, "*")):
                 feature_pathes = glob.glob(os.path.join(chapter, f"{args.model}-*"))
+                features = []
                 for i in range(len(feature_pathes)):
                     features.append(torch.load(feature_pathes[i]).squeeze().to(device))
-                for i in range(len(feature_pathes) - 1):
+                for i in range(len(features) - 1):
                     features_x.append(features[i])
                     features_y.append(features[i+1])
 
@@ -79,12 +80,13 @@ def main(args):
             speaker_sim = []
             features_x = []
             features_y = []
-            features = []
+            
             for chapter in glob.glob(os.path.join(speaker, "*")):
                 feature_pathes = glob.glob(os.path.join(chapter, f"{args.model}-*"))
+                features = []
                 for i in range(len(feature_pathes)):
                     features.append(torch.load(feature_pathes[i]).squeeze().to(device))
-                for i in range(len(feature_pathes) - 1):
+                for i in range(len(features) - 1):
                     features_x.append(features[i])
                     features_y.append(features[i+1])
 
