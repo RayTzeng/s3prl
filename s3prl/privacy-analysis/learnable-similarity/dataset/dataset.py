@@ -43,9 +43,10 @@ class SpeakerLevelDataset(Dataset):
             os.path.join(base_path, split) for split in unseen_splits
         ]
 
-        for split_path in seen_split_pathes:
+        split_choices = [(math.ceil(choices*(i+1)/len(seen_split_pathes))-math.ceil(choices*i/len(seen_split_pathes))) for i in range(len(seen_split_pathes))]
+        for split_path, split_choice in (seen_split_pathes, split_choices):
             all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-            analyze_speakers = random.sample(all_speakers, k=choices)
+            analyze_speakers = random.sample(all_speakers, k=split_choice)
             for speaker in analyze_speakers:
                 for chapter in glob.glob(os.path.join(speaker, "*")):
                     feature_pathes = glob.glob(os.path.join(chapter, f"{model}-*"))
@@ -53,9 +54,10 @@ class SpeakerLevelDataset(Dataset):
                         data_list.append((feature_pathes[i], feature_pathes[i+1], 1, speaker.split('/')[-1]))
         print(len(data_list))
 
-        for split_path in unseen_split_pathes:
+        split_choices = [(math.ceil(choices*(i+1)/len(unseen_split_pathes))-math.ceil(choices*i/len(unseen_split_pathes))) for i in range(len(unseen_split_pathes))]
+        for split_path, split_choice in (unseen_split_pathes, split_choices):
             all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-            analyze_speakers = random.sample(all_speakers, k=int(choices / len(unseen_split_pathes)))
+            analyze_speakers = random.sample(all_speakers, k=split_choice)
             for speaker in analyze_speakers:
                 for chapter in glob.glob(os.path.join(speaker, "*")):
                     feature_pathes = glob.glob(os.path.join(chapter, f"{model}-*"))
