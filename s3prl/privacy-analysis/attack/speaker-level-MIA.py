@@ -13,6 +13,9 @@ import torch.nn as nn
 from matplotlib import pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
+from torch.utils.data import DataLoader
+
+from dataset.dataset import SpeakerLevelDataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,56 +26,32 @@ def main(args):
 
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
-    seen_plot_color = ["blue"]
-    unseen_plot_color = ["purple", "red", "orange", "yellow"]
-    seen_split_pathes = [os.path.join(args.base_path, split) for split in seen_splits]
-    unseen_split_pathes = [
-        os.path.join(args.base_path, split) for split in unseen_splits
-    ]
+    
+    seen_dataset = SpeakerLevelDataset(args.base_path, seen_splits, CHOICE_SIZE, args.model)
+    unseen_dataset = SpeakerLevelDataset(args.base_path, unseen_splits, CHOICE_SIZE, args.model)
+
+    seen_dataloader = DataLoader(seen_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=seen_dataset.collate_fn)
+    unseen_dataloader = DataLoader(unseen_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=unseen_dataset.collate_fn)
 
     intra_speaker_sim_mean = []
     colors = []
 
     # seen data
-    for split_path, plot_color in zip(seen_split_pathes, seen_plot_color):
-        all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.sample(all_speakers, k=CHOICE_SIZE)
-        for speaker in tqdm(analyze_speakers):
-
-            # calculate intra speaker similarity
-
-            speaker_features = []
-            for chapter in glob.glob(os.path.join(speaker, "*")):
-                for feature_path in glob.glob(os.path.join(chapter, f"{args.model}-*")):
-                    feature = torch.load(feature_path).detach().cpu()
-                    feature = feature.squeeze()
-                    speaker_features.append(np.array(feature).mean(axis=0))
-
-            sim = cosine_similarity(speaker_features)
+    for batch_id, (speaker_features) in enumerate(tqdm(seen_dataloader, dynamic_ncols=True, desc=f'Seen')):
+        for speaker_feature in speaker_features:
+            # IPython.embed()
+            sim = cosine_similarity(speaker_feature)
             sim = sim[np.triu_indices(len(sim), k=1)]
             intra_speaker_sim_mean.append(np.mean(sim))
-            colors.append(plot_color)
+            colors.append("blue")
 
     # unseen data
-    N = len(unseen_splits)
-    for split_path, plot_color in zip(unseen_split_pathes, unseen_plot_color):
-        all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
-        analyze_speakers = random.sample(all_speakers, k=int(CHOICE_SIZE / N))
-        for speaker in tqdm(analyze_speakers):
-
-            # calculate intra speaker similarity
-
-            speaker_features = []
-            for chapter in glob.glob(os.path.join(speaker, "*")):
-                for feature_path in glob.glob(os.path.join(chapter, f"{args.model}-*")):
-                    feature = torch.load(feature_path).detach().cpu()
-                    feature = feature.squeeze()
-                    speaker_features.append(np.array(feature).mean(axis=0))
-
-            sim = cosine_similarity(speaker_features)
+    for batch_id, (speaker_features) in enumerate(tqdm(unseen_dataloader, dynamic_ncols=True, desc=f'Unseen')):
+        for speaker_feature in speaker_features:
+            sim = cosine_similarity(speaker_feature)
             sim = sim[np.triu_indices(len(sim), k=1)]
             intra_speaker_sim_mean.append(np.mean(sim))
-            colors.append(plot_color)
+            colors.append("red")
 
     plt.figure(figsize=(80, 40))
     plt.rcParams.update({"font.size": 40})
@@ -84,11 +63,8 @@ def main(args):
     x = [
         1,
         CHOICE_SIZE + 1,
-        CHOICE_SIZE * ((N + 1) / N) + 1,
-        CHOICE_SIZE * ((N + 2) / N) + 1,
-        CHOICE_SIZE * ((N + 3) / N) + 1,
     ]
-    ticks = np.concatenate((seen_splits, unseen_splits))
+    ticks = ['seen', 'unseen']
     plt.bar(
         range(1, len(intra_speaker_sim_mean) + 1), intra_speaker_sim_mean, color=colors
     )
@@ -108,9 +84,9 @@ def main(args):
         ls="--",
         color="red",
     )
-    plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-speaker-level-sim-bar-plot.png")
-    )
+    # plt.savefig(
+    #     os.path.join(args.output_path, f"{args.model}-speaker-level-learnable-sim-bar-plot.png")
+    # )
 
     # apply attack
     percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
@@ -146,11 +122,11 @@ def main(args):
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
-    df = pd.DataFrame({'percentile': percentile_choice,
-                        'recall': recall_by_percentile,
-                        'precision': precision_by_percentile,
-                        'accuracy': accuracy_by_percentile})
-    df.to_csv(os.path.join(args.output_path, f"{args.model}-speaker-level-attack-result.csv"), index=False)
+    # df = pd.DataFrame({'percentile': percentile_choice,
+    #                     'recall': recall_by_percentile,
+    #                     'precision': precision_by_percentile,
+    #                     'accuracy': accuracy_by_percentile})
+    # df.to_csv(os.path.join(args.output_path, f"{args.model}-speaker-level-learnable-attack-result.csv"), index=False)
         
 
 
@@ -166,6 +142,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=57, help="random seed")
     parser.add_argument(
         "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=1, help="batch size"
+    )
+    parser.add_argument(
+        "--num_workers", type=int, default=4, help="number of workers"
     )
     args = parser.parse_args()
 
