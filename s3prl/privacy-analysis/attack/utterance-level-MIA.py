@@ -105,7 +105,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=57, help="random seed")
     parser.add_argument(
-        "--utterance_choice_size", type=int, default=2000, help="how many speaker to pick"
+        "--utterance_choice_size", type=int, default=10000, help="how many speaker to pick"
     )
     parser.add_argument(
         "--batch_size", type=int, default=64, help="batch size"
