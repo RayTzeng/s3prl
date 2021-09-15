@@ -84,9 +84,9 @@ def main(args):
         ls="--",
         color="red",
     )
-    # plt.savefig(
-    #     os.path.join(args.output_path, f"{args.model}-speaker-level-learnable-sim-bar-plot.png")
-    # )
+    plt.savefig(
+        os.path.join(args.output_path, f"{args.model}-speaker-level-sim-bar-plot.png")
+    )
 
     # apply attack
     percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
@@ -122,11 +122,11 @@ def main(args):
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
-    # df = pd.DataFrame({'percentile': percentile_choice,
-    #                     'recall': recall_by_percentile,
-    #                     'precision': precision_by_percentile,
-    #                     'accuracy': accuracy_by_percentile})
-    # df.to_csv(os.path.join(args.output_path, f"{args.model}-speaker-level-learnable-attack-result.csv"), index=False)
+    df = pd.DataFrame({'percentile': percentile_choice,
+                        'recall': recall_by_percentile,
+                        'precision': precision_by_percentile,
+                        'accuracy': accuracy_by_percentile})
+    df.to_csv(os.path.join(args.output_path, f"{args.model}-speaker-level-attack-result.csv"), index=False)
         
 
 
