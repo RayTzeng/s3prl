@@ -14,7 +14,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main(args):
-    random.seed(args.seed)
+    random.seed()
     CHOICE_SIZE = args.speaker_choice_size
     AUXILIARY_DATA_SIZE = int(CHOICE_SIZE * args.auxiliary_data_percentage / 100)
 
@@ -43,10 +43,8 @@ def main(args):
         collate_fn=eval_dataset.collate_fn,
     )
 
-    upstream = torch.hub.load("s3prl/s3prl", args.model).to(device)
-    wavs = [torch.zeros(160000, dtype=torch.float).to(device) for _ in range(1)]
-    feature = upstream(wavs)["last_hidden_state"]
-    input_dim = feature[0].shape[1]
+    feature, _, _, _ = train_dataset[0]
+    input_dim = feature.shape[-1]
     # input_dim = 768
     print(f"input dimension: {input_dim}")
 
@@ -123,8 +121,7 @@ def main(args):
             torch.save(
                 model.state_dict(),
                 os.path.join(
-                    args.output_path,
-                    f"learnable-similarity-{args.model}-seed-{args.seed}.pt",
+                    args.output_path, f"learnable-similarity-{args.model}.pt",
                 ),
             )
             early_stopping = 0
@@ -146,7 +143,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model", help="which self-supervised model you used to extract features"
     )
-    parser.add_argument("--seed", type=int, default=57, help="random seed")
+    # parser.add_argument("--seed", type=int, default=57, help="random seed")
     parser.add_argument(
         "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
     )

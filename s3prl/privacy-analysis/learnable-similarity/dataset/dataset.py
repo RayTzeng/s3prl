@@ -43,7 +43,7 @@ class SpeakerLevelDataset(Dataset):
             )
             for i in range(len(seen_split_pathes))
         ]
-        for split_path, split_choice in (seen_split_pathes, split_choices):
+        for split_path, split_choice in zip(seen_split_pathes, split_choices):
             all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
             analyze_speakers = random.sample(all_speakers, k=split_choice)
             for speaker in analyze_speakers:
@@ -67,7 +67,7 @@ class SpeakerLevelDataset(Dataset):
             )
             for i in range(len(unseen_split_pathes))
         ]
-        for split_path, split_choice in (unseen_split_pathes, split_choices):
+        for split_path, split_choice in zip(unseen_split_pathes, split_choices):
             all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
             analyze_speakers = random.sample(all_speakers, k=split_choice)
             for speaker in analyze_speakers:
