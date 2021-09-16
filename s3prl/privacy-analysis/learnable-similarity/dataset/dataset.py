@@ -1,19 +1,10 @@
-import argparse
 import glob
 import math
 import os
 import random
-import time
 
-import numpy as np
-import pandas as pd
 import torch
-import torch.nn as nn
-from matplotlib import pyplot as plt
-from sklearn.metrics.pairwise import cosine_similarity
-from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
-from tqdm import tqdm
 
 
 class SpeakerLevelDataset(Dataset):

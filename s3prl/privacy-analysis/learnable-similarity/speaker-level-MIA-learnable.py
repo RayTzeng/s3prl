@@ -1,18 +1,13 @@
 import argparse
-import glob
 import math
 import os
 import random
-import time
 from collections import defaultdict
 
-import IPython
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from matplotlib import pyplot as plt
-from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -61,7 +56,7 @@ def main(args):
     seen_speaker_sim = defaultdict(list)
 
     for batch_id, (features_x, features_y, labels, speakers) in enumerate(
-        tqdm(seen_dataloader, dynamic_ncols=True, desc=f"Seen")
+        tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
     ):
         features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
         features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
@@ -74,7 +69,7 @@ def main(args):
     unseen_speaker_sim = defaultdict(list)
 
     for batch_id, (features_x, features_y, labels, speakers) in enumerate(
-        tqdm(unseen_dataloader, dynamic_ncols=True, desc=f"Unseen")
+        tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
     ):
         features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
         features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
@@ -159,11 +154,11 @@ def main(args):
 
     print()
     print(f"[{args.model}]")
-    print(f"precentile: ", " | ".join(f"{num:5}%" for num in percentile_choice))
+    print("precentile: ", " | ".join(f"{num:5}%" for num in percentile_choice))
     print("-----------------------------------------------------------------")
-    print(f"recall:     ", " | ".join(f"{num:.4f}" for num in recall_by_percentile))
-    print(f"precision:  ", " | ".join(f"{num:.4f}" for num in precision_by_percentile))
-    print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
+    print("recall:     ", " | ".join(f"{num:.4f}" for num in recall_by_percentile))
+    print("precision:  ", " | ".join(f"{num:.4f}" for num in precision_by_percentile))
+    print("accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
     df = pd.DataFrame(

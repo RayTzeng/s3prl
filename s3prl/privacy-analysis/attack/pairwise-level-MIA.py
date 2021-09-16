@@ -3,13 +3,10 @@ import glob
 import math
 import os
 import random
-import time
 
-import IPython
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from matplotlib import pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
@@ -180,11 +177,11 @@ def main(args):
 
     print()
     print(f"[{args.model}]")
-    print(f"precentile: ", " | ".join(f"{num:5}%" for num in percentile_choice))
+    print("precentile: ", " | ".join(f"{num:5}%" for num in percentile_choice))
     print("-----------------------------------------------------------------")
-    print(f"recall:     ", " | ".join(f"{num:.4f}" for num in recall_by_percentile))
-    print(f"precision:  ", " | ".join(f"{num:.4f}" for num in precision_by_percentile))
-    print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
+    print("recall:     ", " | ".join(f"{num:.4f}" for num in recall_by_percentile))
+    print("precision:  ", " | ".join(f"{num:.4f}" for num in precision_by_percentile))
+    print("accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
     df = pd.DataFrame(

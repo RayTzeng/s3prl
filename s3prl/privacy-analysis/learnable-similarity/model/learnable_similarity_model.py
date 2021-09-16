@@ -1,14 +1,11 @@
-from argparse import Namespace
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 
 class SelfAttentionPooling(nn.Module):
     """
-    Implementation of SelfAttentionPooling 
+    Implementation of SelfAttentionPooling
     Original Paper: Self-Attention Encoding and Pooling for Speaker Recognition
     https://arxiv.org/pdf/2008.01077v1.pdf
     """
@@ -21,10 +18,10 @@ class SelfAttentionPooling(nn.Module):
         """
         input:
         batch_rep : size (N, T, H), N: batch size, T: sequence length, H: Hidden dimension
-        
+
         attention_weight:
         att_w : size (N, T, 1)
-        
+
         return:
         utter_rep: size (N, H)
         """
@@ -79,20 +76,20 @@ class SpeakerLevelModel(nn.Module):
         return sim
 
 
-class UtteranceLevelModel(nn.Module):
-    def __init__(self, input_dim):
-        super(Model, self).__init__()
+# class UtteranceLevelModel(nn.Module):
+#     def __init__(self, input_dim):
+#         super(Model, self).__init__()
 
-        # agg_module: current support [ "SAP", "Mean" ]
-        # init attributes
-        self.pooling = SelfAttentionPooling(input_dim)
-        self.linear = nn.Linear(input_dim, input_dim)
+#         # agg_module: current support [ "SAP", "Mean" ]
+#         # init attributes
+#         self.pooling = SelfAttentionPooling(input_dim)
+#         self.linear = nn.Linear(input_dim, input_dim)
 
-    def forward(self, features):
-        x = self.pooling(x)
-        x = self.linear(x)
-        x = x.unsqueeze(1)
+#     def forward(self, features):
+#         x = self.pooling(x)
+#         x = self.linear(x)
+#         x = x.unsqueeze(1)
 
-        sim = torch.matmul(x, y).squeeze()
+#         sim = torch.matmul(x, y).squeeze()
 
-        return sim
+#         return sim

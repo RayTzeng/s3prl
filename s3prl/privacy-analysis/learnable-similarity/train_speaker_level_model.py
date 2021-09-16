@@ -1,18 +1,10 @@
 import argparse
-import glob
-import math
 import os
 import random
-import time
 
 import numpy as np
-import pandas as pd
 import torch
-import torch.nn as nn
-from matplotlib import pyplot as plt
-from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.data import DataLoader
-from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
 
 from dataset.dataset import SpeakerLevelDataset
@@ -97,7 +89,7 @@ def main(args):
         model.eval()
         total_loss = []
         for batch_id, (features_x, features_y, labels, speakers) in enumerate(
-            tqdm(eval_dataloader, dynamic_ncols=True, desc=f"Eval")
+            tqdm(eval_dataloader, dynamic_ncols=True, desc="Eval")
         ):
             features_x = [
                 torch.FloatTensor(feature).to(device) for feature in features_x
