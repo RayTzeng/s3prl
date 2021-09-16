@@ -3,7 +3,6 @@ from argparse import Namespace
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.nn.utils.rnn import pad_sequence
 
 
@@ -13,6 +12,7 @@ class SelfAttentionPooling(nn.Module):
     Original Paper: Self-Attention Encoding and Pooling for Speaker Recognition
     https://arxiv.org/pdf/2008.01077v1.pdf
     """
+
     def __init__(self, input_dim):
         super(SelfAttentionPooling, self).__init__()
         self.W = nn.Linear(input_dim, 1)
@@ -45,7 +45,9 @@ class SpeakerLevelModel(nn.Module):
 
     def forward(self, features_x, features_y):
         device = features_x[0].device
-        lengths_x = torch.LongTensor([len(feature) for feature in features_x]).to(device)
+        lengths_x = torch.LongTensor([len(feature) for feature in features_x]).to(
+            device
+        )
         features_x_padding_mask = ~torch.lt(
             torch.arange(max(lengths_x)).unsqueeze(0).to(device),
             lengths_x.unsqueeze(1),
@@ -57,7 +59,9 @@ class SpeakerLevelModel(nn.Module):
         x = self.dropout(x)
         x = x.unsqueeze(1)
 
-        lengths_y = torch.LongTensor([len(feature) for feature in features_y]).to(device)
+        lengths_y = torch.LongTensor([len(feature) for feature in features_y]).to(
+            device
+        )
         features_y_padding_mask = ~torch.lt(
             torch.arange(max(lengths_y)).unsqueeze(0).to(device),
             lengths_y.unsqueeze(1),
@@ -68,17 +72,17 @@ class SpeakerLevelModel(nn.Module):
         y = self.linear(y)
         y = self.dropout(y)
         y = y.unsqueeze(2)
-        
+
         sim = torch.matmul(x, y).squeeze()
         sim = torch.sigmoid(sim) * 2 - 1
- 
+
         return sim
 
 
 class UtteranceLevelModel(nn.Module):
     def __init__(self, input_dim):
         super(Model, self).__init__()
-        
+
         # agg_module: current support [ "SAP", "Mean" ]
         # init attributes
         self.pooling = SelfAttentionPooling(input_dim)
@@ -88,8 +92,7 @@ class UtteranceLevelModel(nn.Module):
         x = self.pooling(x)
         x = self.linear(x)
         x = x.unsqueeze(1)
-        
+
         sim = torch.matmul(x, y).squeeze()
-        
-        
+
         return sim

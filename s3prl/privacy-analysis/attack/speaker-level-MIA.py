@@ -12,8 +12,8 @@ import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
-from tqdm import tqdm
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from dataset.dataset import SpeakerLevelDataset
 
@@ -26,18 +26,36 @@ def main(args):
 
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
-    
-    seen_dataset = SpeakerLevelDataset(args.base_path, seen_splits, CHOICE_SIZE, args.model)
-    unseen_dataset = SpeakerLevelDataset(args.base_path, unseen_splits, CHOICE_SIZE, args.model)
 
-    seen_dataloader = DataLoader(seen_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=seen_dataset.collate_fn)
-    unseen_dataloader = DataLoader(unseen_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=unseen_dataset.collate_fn)
+    seen_dataset = SpeakerLevelDataset(
+        args.base_path, seen_splits, CHOICE_SIZE, args.model
+    )
+    unseen_dataset = SpeakerLevelDataset(
+        args.base_path, unseen_splits, CHOICE_SIZE, args.model
+    )
+
+    seen_dataloader = DataLoader(
+        seen_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=seen_dataset.collate_fn,
+    )
+    unseen_dataloader = DataLoader(
+        unseen_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=unseen_dataset.collate_fn,
+    )
 
     intra_speaker_sim_mean = []
     colors = []
 
     # seen data
-    for batch_id, (speaker_features) in enumerate(tqdm(seen_dataloader, dynamic_ncols=True, desc=f'Seen')):
+    for batch_id, (speaker_features) in enumerate(
+        tqdm(seen_dataloader, dynamic_ncols=True, desc=f"Seen")
+    ):
         for speaker_feature in speaker_features:
             # IPython.embed()
             sim = cosine_similarity(speaker_feature)
@@ -46,7 +64,9 @@ def main(args):
             colors.append("blue")
 
     # unseen data
-    for batch_id, (speaker_features) in enumerate(tqdm(unseen_dataloader, dynamic_ncols=True, desc=f'Unseen')):
+    for batch_id, (speaker_features) in enumerate(
+        tqdm(unseen_dataloader, dynamic_ncols=True, desc=f"Unseen")
+    ):
         for speaker_feature in speaker_features:
             sim = cosine_similarity(speaker_feature)
             sim = sim[np.triu_indices(len(sim), k=1)]
@@ -64,7 +84,7 @@ def main(args):
         1,
         CHOICE_SIZE + 1,
     ]
-    ticks = ['seen', 'unseen']
+    ticks = ["seen", "unseen"]
     plt.bar(
         range(1, len(intra_speaker_sim_mean) + 1), intra_speaker_sim_mean, color=colors
     )
@@ -122,12 +142,18 @@ def main(args):
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
-    df = pd.DataFrame({'percentile': percentile_choice,
-                        'recall': recall_by_percentile,
-                        'precision': precision_by_percentile,
-                        'accuracy': accuracy_by_percentile})
-    df.to_csv(os.path.join(args.output_path, f"{args.model}-speaker-level-attack-result.csv"), index=False)
-        
+    df = pd.DataFrame(
+        {
+            "percentile": percentile_choice,
+            "recall": recall_by_percentile,
+            "precision": precision_by_percentile,
+            "accuracy": accuracy_by_percentile,
+        }
+    )
+    df.to_csv(
+        os.path.join(args.output_path, f"{args.model}-speaker-level-attack-result.csv"),
+        index=False,
+    )
 
 
 if __name__ == "__main__":
@@ -143,12 +169,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
     )
-    parser.add_argument(
-        "--batch_size", type=int, default=1, help="batch size"
-    )
-    parser.add_argument(
-        "--num_workers", type=int, default=4, help="number of workers"
-    )
+    parser.add_argument("--batch_size", type=int, default=1, help="batch size")
+    parser.add_argument("--num_workers", type=int, default=4, help="number of workers")
     args = parser.parse_args()
 
     main(args)

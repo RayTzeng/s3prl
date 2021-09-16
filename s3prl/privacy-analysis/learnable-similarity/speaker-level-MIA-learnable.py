@@ -4,6 +4,7 @@ import math
 import os
 import random
 import time
+from collections import defaultdict
 
 import IPython
 import numpy as np
@@ -12,9 +13,8 @@ import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
-from tqdm import tqdm
-from collections import defaultdict
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from dataset.dataset import SpeakerLevelDataset
 from model.learnable_similarity_model import SpeakerLevelModel
@@ -29,26 +29,40 @@ def main(args):
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
 
-    
-    seen_dataset = SpeakerLevelDataset(args.base_path, seen_splits, [], CHOICE_SIZE, args.model)
-    unseen_dataset = SpeakerLevelDataset(args.base_path, [], unseen_splits, CHOICE_SIZE, args.model)
+    seen_dataset = SpeakerLevelDataset(
+        args.base_path, seen_splits, [], CHOICE_SIZE, args.model
+    )
+    unseen_dataset = SpeakerLevelDataset(
+        args.base_path, [], unseen_splits, CHOICE_SIZE, args.model
+    )
 
-    seen_dataloader = DataLoader(seen_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=seen_dataset.collate_fn)
-    unseen_dataloader = DataLoader(unseen_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=unseen_dataset.collate_fn)
-
+    seen_dataloader = DataLoader(
+        seen_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=seen_dataset.collate_fn,
+    )
+    unseen_dataloader = DataLoader(
+        unseen_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=unseen_dataset.collate_fn,
+    )
 
     ckpt = torch.load(args.sim_model_path)
-    sim_predictor = SpeakerLevelModel(ckpt['linear.weight'].shape[0]).to(device)
+    sim_predictor = SpeakerLevelModel(ckpt["linear.weight"].shape[0]).to(device)
     sim_predictor.load_state_dict(ckpt)
     sim_predictor.eval()
 
-    
-
     # seen data
-    
+
     seen_speaker_sim = defaultdict(list)
 
-    for batch_id, (features_x, features_y, labels, speakers) in enumerate(tqdm(seen_dataloader, dynamic_ncols=True, desc=f'Seen')):
+    for batch_id, (features_x, features_y, labels, speakers) in enumerate(
+        tqdm(seen_dataloader, dynamic_ncols=True, desc=f"Seen")
+    ):
         features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
         features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
         labels = torch.FloatTensor([label for label in labels]).to(device)
@@ -59,7 +73,9 @@ def main(args):
 
     unseen_speaker_sim = defaultdict(list)
 
-    for batch_id, (features_x, features_y, labels, speakers) in enumerate(tqdm(unseen_dataloader, dynamic_ncols=True, desc=f'Unseen')):
+    for batch_id, (features_x, features_y, labels, speakers) in enumerate(
+        tqdm(unseen_dataloader, dynamic_ncols=True, desc=f"Unseen")
+    ):
         features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
         features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
         labels = torch.FloatTensor([label for label in labels]).to(device)
@@ -71,13 +87,13 @@ def main(args):
     intra_speaker_sim_mean = []
     colors = []
 
-    for k,v in seen_speaker_sim.items():
+    for k, v in seen_speaker_sim.items():
         intra_speaker_sim_mean.append(np.mean(v))
-        colors.append('blue')
-    
-    for k,v in unseen_speaker_sim.items():
+        colors.append("blue")
+
+    for k, v in unseen_speaker_sim.items():
         intra_speaker_sim_mean.append(np.mean(v))
-        colors.append('red')
+        colors.append("red")
 
     plt.figure(figsize=(80, 40))
     plt.rcParams.update({"font.size": 40})
@@ -90,7 +106,7 @@ def main(args):
         1,
         CHOICE_SIZE + 1,
     ]
-    ticks = ['seen', 'unseen']
+    ticks = ["seen", "unseen"]
     plt.bar(
         range(1, len(intra_speaker_sim_mean) + 1), intra_speaker_sim_mean, color=colors
     )
@@ -111,7 +127,9 @@ def main(args):
         color="red",
     )
     plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-speaker-level-learnable-sim-bar-plot.png")
+        os.path.join(
+            args.output_path, f"{args.model}-speaker-level-learnable-sim-bar-plot.png"
+        )
     )
 
     # apply attack
@@ -148,12 +166,20 @@ def main(args):
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
-    df = pd.DataFrame({'percentile': percentile_choice,
-                        'recall': recall_by_percentile,
-                        'precision': precision_by_percentile,
-                        'accuracy': accuracy_by_percentile})
-    df.to_csv(os.path.join(args.output_path, f"{args.model}-speaker-level-learnable-attack-result.csv"), index=False)
-        
+    df = pd.DataFrame(
+        {
+            "percentile": percentile_choice,
+            "recall": recall_by_percentile,
+            "precision": precision_by_percentile,
+            "accuracy": accuracy_by_percentile,
+        }
+    )
+    df.to_csv(
+        os.path.join(
+            args.output_path, f"{args.model}-speaker-level-learnable-attack-result.csv"
+        ),
+        index=False,
+    )
 
 
 if __name__ == "__main__":
@@ -170,12 +196,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
     )
-    parser.add_argument(
-        "--batch_size", type=int, default=32, help="batch size"
-    )
-    parser.add_argument(
-        "--num_workers", type=int, default=2, help="number of workers"
-    )
+    parser.add_argument("--batch_size", type=int, default=32, help="batch size")
+    parser.add_argument("--num_workers", type=int, default=2, help="number of workers")
 
     args = parser.parse_args()
 

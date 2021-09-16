@@ -135,11 +135,24 @@ def main(args):
         color="red",
     )
     plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-utterance-level-above-threshold-sim-bar-plot.png")
+        os.path.join(
+            args.output_path,
+            f"{args.model}-utterance-level-above-threshold-sim-bar-plot.png",
+        )
     )
 
     # apply attack
-    percentile_choice = [10,20,30,40, 50, 60, 70, 80, 90, ]
+    percentile_choice = [
+        10,
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+        80,
+        90,
+    ]
 
     seen_spkr_sim = context_level_sim[:num_seen_uttr]
     unseen_spkr_sim = context_level_sim[num_seen_uttr:]
@@ -174,11 +187,21 @@ def main(args):
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
-    df = pd.DataFrame({'percentile': percentile_choice,
-                        'recall': recall_by_percentile,
-                        'precision': precision_by_percentile,
-                        'accuracy': accuracy_by_percentile})
-    df.to_csv(os.path.join(args.output_path, f"{args.model}-utterance-level-above-threshold-attack-result.csv"), index=False)
+    df = pd.DataFrame(
+        {
+            "percentile": percentile_choice,
+            "recall": recall_by_percentile,
+            "precision": precision_by_percentile,
+            "accuracy": accuracy_by_percentile,
+        }
+    )
+    df.to_csv(
+        os.path.join(
+            args.output_path,
+            f"{args.model}-utterance-level-above-threshold-attack-result.csv",
+        ),
+        index=False,
+    )
 
 
 if __name__ == "__main__":

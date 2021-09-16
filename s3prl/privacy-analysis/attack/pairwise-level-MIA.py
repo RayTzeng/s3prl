@@ -148,9 +148,7 @@ def main(args):
         color="red",
     )
     plt.savefig(
-        os.path.join(
-            args.output_path, f"{args.model}-pairwise-level-sim-bar-plot.png"
-        )
+        os.path.join(args.output_path, f"{args.model}-pairwise-level-sim-bar-plot.png")
     )
 
     # apply attack
@@ -189,12 +187,20 @@ def main(args):
     print(f"accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
     print()
 
-    df = pd.DataFrame({'percentile': percentile_choice,
-                        'recall': recall_by_percentile,
-                        'precision': precision_by_percentile,
-                        'accuracy': accuracy_by_percentile})
-    df.to_csv(os.path.join(args.output_path, f"{args.model}-pairwise-level-attack-result.csv"), index=False)
-        
+    df = pd.DataFrame(
+        {
+            "percentile": percentile_choice,
+            "recall": recall_by_percentile,
+            "precision": precision_by_percentile,
+            "accuracy": accuracy_by_percentile,
+        }
+    )
+    df.to_csv(
+        os.path.join(
+            args.output_path, f"{args.model}-pairwise-level-attack-result.csv"
+        ),
+        index=False,
+    )
 
 
 if __name__ == "__main__":
