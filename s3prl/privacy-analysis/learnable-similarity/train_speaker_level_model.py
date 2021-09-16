@@ -50,7 +50,7 @@ def main(args):
 
     model = SpeakerLevelModel(input_dim).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-    criterion = torch.nn.BCELoss()
+    criterion = torch.nn.BCEWithLogitsLoss()
 
     min_loss = 1000
     early_stopping = 0
@@ -72,17 +72,17 @@ def main(args):
             loss = criterion(pred, labels)
             loss.backward()
             optimizer.step()
-            if batch_id % 25 == 0:
-                str_pred = ",".join(
-                    [f"{x:.4f}" for x in pred.detach().cpu().tolist()[:10]]
-                )
-                str_label = ",".join(
-                    [f"{x:.4f}" for x in labels.detach().cpu().tolist()[:10]]
-                )
-                tqdm.write(f"[Train] Loss :      {loss.detach().cpu().item()}")
-                tqdm.write(f"[Train] Prediction: {str_pred}")
-                tqdm.write(f"[Train] Label :     {str_label}")
-                tqdm.write(" ")
+            # if batch_id % 25 == 0:
+            #     str_pred = ",".join(
+            #         [f"{x:.4f}" for x in pred.detach().cpu().tolist()[:10]]
+            #     )
+            #     str_label = ",".join(
+            #         [f"{x:.4f}" for x in labels.detach().cpu().tolist()[:10]]
+            #     )
+            #     tqdm.write(f"[Train] Loss :      {loss.detach().cpu().item()}")
+            #     tqdm.write(f"[Train] Prediction: {str_pred}")
+            #     tqdm.write(f"[Train] Label :     {str_label}")
+            #     tqdm.write(" ")
 
         model.eval()
         total_loss = []
@@ -102,17 +102,17 @@ def main(args):
             loss = criterion(pred, labels)
             total_loss.append(loss.detach().cpu().item())
 
-            if batch_id % 10 == 0:
-                str_pred = ",".join(
-                    [f"{x:.4f}" for x in pred.detach().cpu().tolist()[:10]]
-                )
-                str_label = ",".join(
-                    [f"{x:.4f}" for x in labels.detach().cpu().tolist()[:10]]
-                )
-                tqdm.write(f"[Eval] Loss :      {loss.detach().cpu().item()}")
-                tqdm.write(f"[Eval] Prediction: {str_pred}")
-                tqdm.write(f"[Eval] Label:      {str_label}")
-                tqdm.write(" ")
+            # if batch_id % 10 == 0:
+            #     str_pred = ",".join(
+            #         [f"{x:.4f}" for x in pred.detach().cpu().tolist()[:10]]
+            #     )
+            #     str_label = ",".join(
+            #         [f"{x:.4f}" for x in labels.detach().cpu().tolist()[:10]]
+            #     )
+            #     tqdm.write(f"[Eval] Loss :      {loss.detach().cpu().item()}")
+            #     tqdm.write(f"[Eval] Prediction: {str_pred}")
+            #     tqdm.write(f"[Eval] Label:      {str_label}")
+            #     tqdm.write(" ")
         total_loss = np.mean(total_loss)
 
         if total_loss < min_loss:

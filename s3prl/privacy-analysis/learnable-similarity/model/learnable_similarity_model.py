@@ -71,7 +71,6 @@ class SpeakerLevelModel(nn.Module):
         y = y.unsqueeze(2)
 
         sim = torch.matmul(x, y).squeeze()
-        sim = torch.sigmoid(sim) * 2 - 1
 
         return sim
 

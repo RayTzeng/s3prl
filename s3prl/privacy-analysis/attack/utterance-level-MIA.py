@@ -6,11 +6,13 @@ import random
 import numpy as np
 import pandas as pd
 import torch
+from matplotlib import pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from dataset.dataset import UtteranceLevelDataset
+from utils.utils import compute_utterance_adversarial_advantage_by_percentile, compute_utterance_adversarial_advantage_by_ROC
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -69,47 +71,46 @@ def main(args):
 
     seen_uttr_sim = context_level_sim[:CHOICE_SIZE]
     unseen_uttr_sim = context_level_sim[CHOICE_SIZE:]
-    recall_by_percentile = []
-    precision_by_percentile = []
-    accuracy_by_percentile = []
 
-    for percentile in percentile_choice:
-        sorted_unseen_uttr_sim = sorted(unseen_uttr_sim)
-        threshold = sorted_unseen_uttr_sim[math.floor(CHOICE_SIZE * percentile / 100)]
-        TP = len([sim for sim in seen_uttr_sim if sim < threshold])
-        FN = len([sim for sim in seen_uttr_sim if sim >= threshold])
-        FP = len([sim for sim in unseen_uttr_sim if sim < threshold])
-        TN = len([sim for sim in unseen_uttr_sim if sim >= threshold])
-
-        recall = TP / (TP + FN)
-        precision = TP / (TP + FP)
-        accuracy = (TP + TN) / (TP + FP + FN + TN)
-
-        recall_by_percentile.append(recall)
-        precision_by_percentile.append(precision)
-        accuracy_by_percentile.append(accuracy)
-
-    print()
-    print(f"[{args.model}]")
-    print("precentile: ", " | ".join(f"{num:5}%" for num in percentile_choice))
-    print("-----------------------------------------------------------------")
-    print("recall:     ", " | ".join(f"{num:.4f}" for num in recall_by_percentile))
-    print("precision:  ", " | ".join(f"{num:.4f}" for num in precision_by_percentile))
-    print("accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
-    print()
+    TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
 
     df = pd.DataFrame(
         {
-            "percentile": percentile_choice,
-            "recall": recall_by_percentile,
-            "precision": precision_by_percentile,
-            "accuracy": accuracy_by_percentile,
+            "Percentile": percentile_choice,
+            "True Positive Rate": TPR,
+            "False Positive Rate": FPR,
+            "Adversarial Advantage": AA,
         }
     )
     df.to_csv(
-        os.path.join(
-            args.output_path, f"{args.model}-utterance-level-attack-result.csv"
-        ),
+        os.path.join(args.output_path, f"{args.model}-utterance-level-attack-result-by-percentile.csv"),
+        index=False,
+    )
+
+    TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
+
+    plt.figure()
+    plt.rcParams.update({"font.size": 12})
+    plt.title(f'Utterance-level attack ROC Curve - {args.model}')
+    plt.plot(FPRs, TPRs, color="darkorange", lw=2, label=f"ROC curve (area = {avg_AUC:0.2f})")
+    plt.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.ylabel('True Positive Rate')
+    plt.xlabel('False Positive Rate')
+    plt.legend(loc="lower right")
+    plt.savefig(
+        os.path.join(args.output_path, f"{args.model}-utterance-level-attack-ROC-curve.png")
+    )
+
+    df = pd.DataFrame(
+        {
+            "Seen_uttr_sim": seen_uttr_sim, 
+            "Unseen_uttr_sim": unseen_uttr_sim
+        }
+    )
+    df.to_csv(
+        os.path.join(args.output_path, f"{args.model}-utterance-level-attack-similarity.csv"),
         index=False,
     )
 
