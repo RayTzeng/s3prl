@@ -15,8 +15,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def main(args):
     random.seed()
-    CHOICE_SIZE = args.speaker_choice_size
-    AUXILIARY_DATA_SIZE = int(CHOICE_SIZE * args.auxiliary_data_percentage / 100)
+    AUXILIARY_DATA_SIZE = args.auxiliary_data_choice_size
 
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
@@ -145,13 +144,7 @@ if __name__ == "__main__":
     )
     # parser.add_argument("--seed", type=int, default=57, help="random seed")
     parser.add_argument(
-        "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
-    )
-    parser.add_argument(
-        "--auxiliary_data_percentage",
-        type=int,
-        default=10,
-        help="how many percentage of data is auxiliary data",
+        "--auxiliary_data_choice_size", type=int, default=10, help="how many speaker to pick"
     )
     parser.add_argument(
         "--train_batch_size", type=int, default=32, help="training batch size"

@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from dataset.dataset import SpeakerLevelDataset
 from model.learnable_similarity_model import SpeakerLevelModel
+from utils.utils import compute_speaker_adversarial_advantage_by_percentile, compute_speaker_adversarial_advantage_by_ROC
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -55,29 +56,31 @@ def main(args):
 
     seen_speaker_sim = defaultdict(list)
 
-    for batch_id, (features_x, features_y, labels, speakers) in enumerate(
-        tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
-    ):
-        features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
-        features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
-        labels = torch.FloatTensor([label for label in labels]).to(device)
-        with torch.no_grad():
+    with torch.no_grad():
+        for batch_id, (features_x, features_y, labels, speakers) in enumerate(
+            tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
+        ):
+            features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
+            features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
+            labels = torch.FloatTensor([label for label in labels]).to(device)
+            
             pred = sim_predictor(features_x, features_y)
-        for i in range(len(speakers)):
-            seen_speaker_sim[speakers[i]].append(pred[i].cpu().item())
+            for i in range(len(speakers)):
+                seen_speaker_sim[speakers[i]].append(pred[i].cpu().item())
 
     unseen_speaker_sim = defaultdict(list)
 
-    for batch_id, (features_x, features_y, labels, speakers) in enumerate(
-        tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
-    ):
-        features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
-        features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
-        labels = torch.FloatTensor([label for label in labels]).to(device)
-        with torch.no_grad():
+    with torch.no_grad():
+        for batch_id, (features_x, features_y, labels, speakers) in enumerate(
+            tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
+        ):
+            features_x = [torch.FloatTensor(feature).to(device) for feature in features_x]
+            features_y = [torch.FloatTensor(feature).to(device) for feature in features_y]
+            labels = torch.FloatTensor([label for label in labels]).to(device)
+            
             pred = sim_predictor(features_x, features_y)
-        for i in range(len(speakers)):
-            unseen_speaker_sim[speakers[i]].append(pred[i].cpu().item())
+            for i in range(len(speakers)):
+                unseen_speaker_sim[speakers[i]].append(pred[i].cpu().item())
 
     intra_speaker_sim_mean = []
     colors = []
@@ -132,47 +135,46 @@ def main(args):
 
     seen_spkr_sim = intra_speaker_sim_mean[:CHOICE_SIZE]
     unseen_spkr_sim = intra_speaker_sim_mean[CHOICE_SIZE:]
-    recall_by_percentile = []
-    precision_by_percentile = []
-    accuracy_by_percentile = []
 
-    for percentile in percentile_choice:
-        sorted_unseen_spkr_sim = sorted(unseen_spkr_sim)
-        threshold = sorted_unseen_spkr_sim[math.floor(CHOICE_SIZE * percentile / 100)]
-        TP = len([sim for sim in seen_spkr_sim if sim > threshold])
-        FN = len([sim for sim in seen_spkr_sim if sim <= threshold])
-        FP = len([sim for sim in unseen_spkr_sim if sim > threshold])
-        TN = len([sim for sim in unseen_spkr_sim if sim <= threshold])
-
-        recall = TP / (TP + FN)
-        precision = TP / (TP + FP)
-        accuracy = (TP + TN) / (TP + FP + FN + TN)
-
-        recall_by_percentile.append(recall)
-        precision_by_percentile.append(precision)
-        accuracy_by_percentile.append(accuracy)
-
-    print()
-    print(f"[{args.model}]")
-    print("precentile: ", " | ".join(f"{num:5}%" for num in percentile_choice))
-    print("-----------------------------------------------------------------")
-    print("recall:     ", " | ".join(f"{num:.4f}" for num in recall_by_percentile))
-    print("precision:  ", " | ".join(f"{num:.4f}" for num in precision_by_percentile))
-    print("accuracy:   ", " | ".join(f"{num:.4f}" for num in accuracy_by_percentile))
-    print()
+    TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(seen_spkr_sim, unseen_spkr_sim, percentile_choice, args.model)
 
     df = pd.DataFrame(
         {
-            "percentile": percentile_choice,
-            "recall": recall_by_percentile,
-            "precision": precision_by_percentile,
-            "accuracy": accuracy_by_percentile,
+            "Percentile": percentile_choice,
+            "True Positive Rate": TPR,
+            "False Positive Rate": FPR,
+            "Adversarial Advantage": AA,
         }
     )
     df.to_csv(
-        os.path.join(
-            args.output_path, f"{args.model}-speaker-level-learnable-attack-result.csv"
-        ),
+        os.path.join(args.output_path, f"{args.model}-speaker-level-attack-result-by-percentile.csv"),
+        index=False,
+    )
+
+    TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(seen_spkr_sim, unseen_spkr_sim, args.model)
+
+    plt.figure()
+    plt.rcParams.update({"font.size": 12})
+    plt.title(f'Speaker-level attack ROC Curve - {args.model}')
+    plt.plot(FPRs, TPRs, color="darkorange", lw=2, label=f"ROC curve (area = {avg_AUC:0.2f})")
+    plt.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.ylabel('True Positive Rate')
+    plt.xlabel('False Positive Rate')
+    plt.legend(loc="lower right")
+    plt.savefig(
+        os.path.join(args.output_path, f"{args.model}-speaker-level-attack-ROC-curve.png")
+    )
+
+    df = pd.DataFrame(
+        {
+            "Seen_spkr_sim": seen_spkr_sim,
+            "Unseen_spkr_sim": unseen_spkr_sim
+        }
+    )
+    df.to_csv(
+        os.path.join(args.output_path, f"{args.model}-speaker-level-attack-similarity.csv"),
         index=False,
     )
 
