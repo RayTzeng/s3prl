@@ -1,7 +1,10 @@
-BASE_PATH=/home/raytz/Disk/LibriSpeech
-OUTPUT_PATH=/home/raytz/Disk/LibriSpeech-Feature
+BASE_PATH=/groups/public/LibriSpeech
+OUTPUT_PATH=/livingrooms/wiz94156/LibriSpeech-Feature
+OUTPUT_PREFIX=mel20ms
+CONFIG=/livingrooms/wiz94156/Privacy-issues-speech-bert/s3prl/s3prl/upstream/baseline/mel20ms.yaml
 
-for MODEL in wav2vec2_large_960 wav2vec2_large_ll60k tera_100hr 
+
+for MODEL in baseline_local
 do
 echo "running ${MODEL}"
 
@@ -11,7 +14,9 @@ echo "[running ${SPLIT}]"
 python preprocess_feature_LibriSpeech.py --base_path $BASE_PATH \
     --split $SPLIT \
     --output_path $OUTPUT_PATH \
-    --model $MODEL
+    --model $MODEL \
+    --output_prefix $OUTPUT_PREFIX \
+    --config $CONFIG
 done
 
 done

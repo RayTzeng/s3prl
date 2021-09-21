@@ -18,8 +18,20 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main(args):
-    model = torch.hub.load('s3prl/s3prl', args.model).to(device)
+    print(args.config)
+    if args.config is not None:
+        model = torch.hub.load('s3prl/s3prl', args.model, model_config=args.config).to(device)
+    else:
+        model = torch.hub.load('s3prl/s3prl', args.model).to(device)
     model.eval()
+
+    print(args.output_prefix)
+    if args.output_prefix is not None:
+        output_prefix = args.output_prefix
+    else:
+        output_prefix = args.model
+
+    print(output_prefix)
 
     split_path = os.path.join(args.base_path, args.split)
     
@@ -38,26 +50,27 @@ def main(args):
                 tqdm.write(f"Directory {output_folder} Created ")
 
             # 
-            for audio_path in glob.glob(os.path.join(split_path, speaker, chapter,'*.flac')):
-                audio_count += 1
+            with torch.no_grad():
+                for audio_path in glob.glob(os.path.join(split_path, speaker, chapter,'*.flac')):
+                    audio_count += 1
 
-                audio_name = audio_path.split("/")[-1]
+                    audio_name = audio_path.split("/")[-1]
 
-                wav, _ = apply_effects_file(
-                    audio_path,
-                    [
-                        ["channels", "1"],
-                        ["rate", "16000"],
-                        ["norm"],
-                    ],
-                )
-                wav = wav.squeeze(0).to(device)
-                with torch.no_grad():
+                    wav, _ = apply_effects_file(
+                        audio_path,
+                        [
+                            ["channels", "1"],
+                            ["rate", "16000"],
+                            ["norm"],
+                        ],
+                    )
+                    wav = wav.squeeze(0).to(device)
+                    
                     feature = model([wav])['last_hidden_state']
 
-                output_path = os.path.join(args.output_path, args.split, speaker.split("/")[-1], chapter.split("/")[-1], f"{args.model}-{audio_name}.pt")
-                tqdm.write(output_path)
-                torch.save(feature.cpu(), output_path)
+                    output_path = os.path.join(args.output_path, args.split, speaker.split("/")[-1], chapter.split("/")[-1], f"{output_prefix}-{audio_name}.pt")
+                    tqdm.write(output_path)
+                    torch.save(feature.cpu(), output_path)
                 
                 
 
@@ -74,6 +87,8 @@ if __name__ == "__main__":
     parser.add_argument("--split", help="which split of LibriSpeech")
     parser.add_argument("--output_path", help="directory to save feautures")
     parser.add_argument("--model", help="which self-supervised model to extract features")
+    parser.add_argument("--output_prefix", default=None, help="output prefix")
+    parser.add_argument("--config", default=None, help="config")
     args = parser.parse_args()
 
     
