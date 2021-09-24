@@ -1,3 +1,4 @@
+import warnings
 import argparse
 import math
 import os
@@ -11,174 +12,226 @@ import pandas as pd
 import torch
 from matplotlib import pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from torch.utils.data.dataset import Subset
 from tqdm import tqdm
+from audtorch.metrics.functional import pearsonr
 import IPython
 
 from dataset.dataset import ReconstructionBasedUtteranceLevelDataset
-from utils.utils import compute_utterance_adversarial_advantage_by_percentile, compute_utterance_adversarial_advantage_by_ROC
-from utils.deepwrapper import DeepWrapper
+from utils.utils import compute_speaker_adversarial_advantage_by_percentile, compute_speaker_adversarial_advantage_by_ROC
+from utils.CCAmodels import DCCAModel, DCCAEModel
 
-from cca_zoo.deepmodels import objectives, architectures, DCCAE
+from cca_zoo.deepmodels import objectives, architectures, DCCA,DCCAE
+
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
+
+warnings.filterwarnings("ignore")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main(args):
     random.seed(args.seed)
-    CHOICE_SIZE = args.utterance_choice_size
+    CHOICE_SIZE = args.utterance_choice_size // 2
 
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
 
     seen_dataset = ReconstructionBasedUtteranceLevelDataset(
-        args.base_path, seen_splits, CHOICE_SIZE, args.model
+        args.base_path, seen_splits, 100, args.model
     )
-    unseen_dataset = ReconstructionBasedUtteranceLevelDataset(
-        args.base_path, unseen_splits, CHOICE_SIZE, args.model
+    all_unseen_dataset = ReconstructionBasedUtteranceLevelDataset(
+        args.base_path, unseen_splits, CHOICE_SIZE + 100, args.model
     )
 
-    train_dataloader = DataLoader(
-        unseen_dataset,
-        batch_size=200,
+    unseen_dataset, cca_dataset = torch.utils.data.random_split(
+        all_unseen_dataset, [100, CHOICE_SIZE])
+
+    cca_dataloader = DataLoader(
+        cca_dataset,
+        batch_size=64,
         shuffle=False,
         num_workers=8,
-        collate_fn=unseen_dataset.collate_fn,
+        collate_fn=all_unseen_dataset.collate_fn,
     )
 
-    
+    seen_dataloader = DataLoader(
+        seen_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=4,
+        collate_fn=seen_dataset.collate_fn,
+    )
 
-    latent_dims = 32
+    unseen_dataloader = DataLoader(
+        unseen_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=4,
+        collate_fn=all_unseen_dataset.collate_fn,
+    )
 
-    encoder_1 = architectures.Encoder(latent_dims=latent_dims, feature_size=768)
-    encoder_2 = architectures.Encoder(latent_dims=latent_dims, feature_size=201)
-    decoder_1 = architectures.Decoder(latent_dims=latent_dims, feature_size=768)
-    decoder_2 = architectures.Decoder(latent_dims=latent_dims, feature_size=201)
-    dccae_model = DCCAE(latent_dims=latent_dims, encoders=[encoder_1, encoder_2], decoders=[decoder_1, decoder_2]).to(device)
+    latent_dims = 70
+    x_dim = seen_dataset[0][0].shape[1]
+    y_dim = seen_dataset[0][1].shape[1]
 
-    optimizer = torch.optim.Adam(dccae_model.parameters(), lr=1e-4)
+    model = DCCAEModel(x_dim=x_dim, y_dim=y_dim,
+                     latent_dims=latent_dims).to(device)
+
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, weight_decay=1e-4)
     epochs = 20
 
     for epoch in range(1, epochs + 1):
-        dccae_model.train()
+        model.train()
         train_loss = 0
-        for batch_idx, (data, label) in enumerate(tqdm(train_dataloader, dynamic_ncols=True, desc=f"Train | Epoch {epoch}")):
+        for batch_idx, (x, y) in enumerate(tqdm(cca_dataloader, dynamic_ncols=True, desc=f"Train | Epoch {epoch}")):
+            # def closure():
             optimizer.zero_grad()
-            data = [d.to(device) for d in list(data)]
-            loss = dccae_model.loss(*data)
+            x = torch.cat(x).to(device)
+            y = torch.cat(y).to(device)
+            loss = model.loss(x, y)
             loss.backward()
-            torch.nn.utils.clip_grad_value_(dccae_model.parameters(), clip_value=float('inf'))
+            tqdm.write(f"loss: {loss.item():.4f}")
+
+            torch.nn.utils.clip_grad_value_(
+                model.parameters(), clip_value=float("inf"))
             optimizer.step()
-            train_loss += loss.item()
-        epoch_train_loss = train_loss / len(train_dataloader)
+            # loss = closure()
+            train_loss += loss.item() / len(cca_dataloader)
+
+        epoch_train_loss = train_loss
         print('====> Epoch: {} Average train loss: {:.4f}'.format(
             epoch, epoch_train_loss))
 
-        for dataset in [seen_dataset, unseen_dataset]:
-            for i in range(5):
-                eval_dataloader = DataLoader(
-                    Subset(dataset, [i]),
-                    batch_size=1,
-                    shuffle=False,
-                    num_workers=1,
-                    collate_fn=dataset.collate_fn,
-                )
+        if epoch % 1 == 0:
+            context_level_sim = []
+            context_level_sim_2 = []
 
-                with torch.no_grad():
-                    for batch_idx, (data, label) in enumerate(eval_dataloader):
-                        data = [d.to(device) for d in list(data)]
-                        z = dccae_model(*data)
-                        if batch_idx == 0:
-                            z_list = [z_i.detach().cpu().numpy() for i, z_i in enumerate(z)]
-                        else:
-                            z_list = [np.append(z_list[i], z_i.detach().cpu().numpy(), axis=0) for
-                                    i, z_i in enumerate(z)]
-                z_list = dccae_model.post_transform(*z_list, train=False)
+            model.eval()
+            with torch.no_grad():
+                for batch_idx, (x, y) in enumerate(tqdm(seen_dataloader, dynamic_ncols=True, desc=f"Seen")):
+                    # length = [len(rep) for rep in x]
+                    # prefix = list(itertools.accumulate(length, initial=0))
+                    # x = torch.cat(x).to(device)
+                    # y = torch.cat(y).to(device)
+                    # z_x, z_y = model(x, y)
 
-                transformed_views = z_list
-                all_corrs = []
-                for x, y in itertools.product(transformed_views, repeat=2):
-                    all_corrs.append(np.diag(np.corrcoef(x.T, y.T)[:x.shape[1], y.shape[1]:]))
-                all_corrs = np.array(all_corrs).reshape(
-                    (len(transformed_views), len(transformed_views), -1))
+                    x = torch.cat(x).to(device)
+                    y = torch.cat(y).to(device)
+                    score = model.score(x, y)
+                    context_level_sim.append(np.mean(score))
 
-                pair_corrs = all_corrs
-                n_views = pair_corrs.shape[0]
-                dim_corrs = (pair_corrs.sum(axis=tuple(range(pair_corrs.ndim - 1))) - n_views) / (
-                        n_views ** 2 - n_views)
+                    # for i in range(len(prefix) - 1):
+                    #     corr = pearsonr(z_x[prefix[i]:prefix[i+1]], z_y[prefix[i]:prefix[i+1]])
+                    #     context_level_sim.append(torch.mean(corr).cpu().item())
+
+                    #     corr = pearsonr(z_x[prefix[i]:prefix[i+1]].T, z_y[prefix[i]:prefix[i+1]].T)
+                    #     context_level_sim_2.append(torch.mean(corr).cpu().item())
 
 
-                print(np.mean(dim_corrs))
+                for batch_idx, (x, y) in enumerate(tqdm(unseen_dataloader, dynamic_ncols=True, desc=f"Unseen")):
+                    # length = [len(rep) for rep in x]
+                    # prefix = list(itertools.accumulate(length, initial=0))
+                    # x = torch.cat(x).to(device)
+                    # y = torch.cat(y).to(device)
+                    # z_x, z_y = model(x, y)
 
+                    x = torch.cat(x).to(device)
+                    y = torch.cat(y).to(device)
+                    score = model.score(x, y)
+                    context_level_sim.append(np.mean(score))
 
-#     context_level_sim = []
+                    # for i in range(len(prefix) - 1):
+                    #     corr = pearsonr(z_x[prefix[i]:prefix[i+1]], z_y[prefix[i]:prefix[i+1]])
+                    #     context_level_sim.append(torch.mean(corr).cpu().item())
 
-#     # seen data
-#     for batch_id, (utterance_features) in enumerate(
-#         tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
-#     ):
-#         for utterance_feature in utterance_features:
-#             sim = cosine_similarity(utterance_feature)
-#             sim = sim[np.triu_indices(len(sim), k=1)]
-#             context_level_sim.append(np.mean(sim))
+                    #     corr = pearsonr(z_x[prefix[i]:prefix[i+1]].T, z_y[prefix[i]:prefix[i+1]].T)
+                    #     context_level_sim_2.append(torch.mean(corr).cpu().item())
 
-#     # unseen data
-#     for batch_id, (utterance_features) in enumerate(
-#         tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
-#     ):
-#         for utterance_feature in utterance_features:
-#             sim = cosine_similarity(utterance_feature)
-#             sim = sim[np.triu_indices(len(sim), k=1)]
-#             context_level_sim.append(np.mean(sim))
+            percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 
-#     # apply attack
-#     percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
+            print("feature correlation")
+            
+            seen_uttr_sim = context_level_sim[:100]
+            unseen_uttr_sim = context_level_sim[100:]
 
-#     seen_uttr_sim = context_level_sim[:CHOICE_SIZE]
-#     unseen_uttr_sim = context_level_sim[CHOICE_SIZE:]
+            TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(
+                seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+            TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(
+                seen_uttr_sim, unseen_uttr_sim, args.model)
 
-#     TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+            # print("dimensional correlation")
 
-#     df = pd.DataFrame(
-#         {
-#             "Percentile": percentile_choice,
-#             "True Positive Rate": TPR,
-#             "False Positive Rate": FPR,
-#             "Adversarial Advantage": AA,
-#         }
-#     )
-#     df.to_csv(
-#         os.path.join(args.output_path, f"{args.model}-utterance-level-attack-result-by-percentile.csv"),
-#         index=False,
-#     )
+            # seen_uttr_sim = context_level_sim_2[:100]
+            # unseen_uttr_sim = context_level_sim_2[100:]
 
-#     TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
+            # TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(
+            #     seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+            # TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(
+            #     seen_uttr_sim, unseen_uttr_sim, args.model)
 
-#     plt.figure()
-#     plt.rcParams.update({"font.size": 12})
-#     plt.title(f'Utterance-level attack ROC Curve - {args.model}')
-#     plt.plot(FPRs, TPRs, color="darkorange", lw=2, label=f"ROC curve (area = {avg_AUC:0.2f})")
-#     plt.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
-#     plt.xlim([0.0, 1.0])
-#     plt.ylim([0.0, 1.05])
-#     plt.ylabel('True Positive Rate')
-#     plt.xlabel('False Positive Rate')
-#     plt.legend(loc="lower right")
-#     plt.savefig(
-#         os.path.join(args.output_path, f"{args.model}-utterance-level-attack-ROC-curve.png")
-#     )
+        # model.eval()
+        # for dataset in [seen_dataset, unseen_dataset]:
+        #     for i in range(5):
+        #         eval_dataloader = DataLoader(
+        #             Subset(dataset, [i]),
+        #             batch_size=1,
+        #             shuffle=False,
+        #             num_workers=1,
+        #             collate_fn=dataset.collate_fn,
+        #         )
 
-#     df = pd.DataFrame(
-#         {
-#             "Seen_uttr_sim": seen_uttr_sim, 
-#             "Unseen_uttr_sim": unseen_uttr_sim
-#         }
-#     )
-#     df.to_csv(
-#         os.path.join(args.output_path, f"{args.model}-utterance-level-attack-similarity.csv"),
-#         index=False,
-#     )
+    # apply attack
+    percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
+
+    seen_uttr_sim = context_level_sim[:1000]
+    unseen_uttr_sim = context_level_sim[1000:]
+
+    TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(
+        seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+
+    # df = pd.DataFrame(
+    #     {
+    #         "Percentile": percentile_choice,
+    #         "True Positive Rate": TPR,
+    #         "False Positive Rate": FPR,
+    #         "Adversarial Advantage": AA,
+    #     }
+    # )
+    # df.to_csv(
+    #     os.path.join(args.output_path, f"{args.model}-recon-utterance-level-attack-result-by-percentile.csv"),
+    #     index=False,
+    # )
+
+    TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(
+        seen_uttr_sim, unseen_uttr_sim, args.model)
+
+    # plt.figure()
+    # plt.rcParams.update({"font.size": 12})
+    # plt.title(f'Utterance-level attack ROC Curve - {args.model}')
+    # plt.plot(FPRs, TPRs, color="darkorange", lw=2, label=f"ROC curve (area = {avg_AUC:0.2f})")
+    # plt.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
+    # plt.xlim([0.0, 1.0])
+    # plt.ylim([0.0, 1.05])
+    # plt.ylabel('True Positive Rate')
+    # plt.xlabel('False Positive Rate')
+    # plt.legend(loc="lower right")
+    # plt.savefig(
+    #     os.path.join(args.output_path, f"{args.model}-recon-utterance-level-attack-ROC-curve.png")
+    # )
+
+    # df = pd.DataFrame(
+    #     {
+    #         "Seen_uttr_sim": seen_uttr_sim,
+    #         "Unseen_uttr_sim": unseen_uttr_sim
+    #     }
+    # )
+    # df.to_csv(
+    #     os.path.join(args.output_path, f"{args.model}-recon-utterance-level-attack-similarity.csv"),
+    #     index=False,
+    # )
 
 
 if __name__ == "__main__":
@@ -186,7 +239,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_path", help="directory of feature of LibriSpeech dataset"
     )
-    parser.add_argument("--output_path", help="directory to save the analysis results")
+    parser.add_argument(
+        "--output_path", help="directory to save the analysis results")
     parser.add_argument(
         "--model", help="which self-supervised model you used to extract features"
     )
@@ -197,8 +251,10 @@ if __name__ == "__main__":
         default=10000,
         help="how many speaker to pick",
     )
-    parser.add_argument("--batch_size", type=int, default=64, help="batch size")
-    parser.add_argument("--num_workers", type=int, default=4, help="number of workers")
+    parser.add_argument("--batch_size", type=int,
+                        default=64, help="batch size")
+    parser.add_argument("--num_workers", type=int,
+                        default=4, help="number of workers")
     args = parser.parse_args()
 
     main(args)

@@ -33,8 +33,16 @@ def main(args):
         sorted_similarity, sorted_utterances = zip(*sorted(zip(similarity, utterances)))
         sorted_similarity = list(sorted_similarity)
         sorted_utterances = list(sorted_utterances)
+
+        if np.mean(sorted_similarity) > 0.5:
+            # large to small
+            sorted_similarity.reverse()
+            sorted_utterances.reverse()
+
         # IPython.embed()
+        # larger value (negative sample) needs to be closer to 1
         negative_utterances = sorted_utterances[-AUXILIARY_DATA_SIZE:]
+        # smaller value (positive sample) needs to be closer to 0
         positive_utterances = sorted_utterances[:AUXILIARY_DATA_SIZE]
         train_dataset = CertainUtteranceDataset(
             args.base_path, positive_utterances, negative_utterances, args.model

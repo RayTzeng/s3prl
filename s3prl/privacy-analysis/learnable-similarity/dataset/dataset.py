@@ -26,7 +26,16 @@ class SpeakerLevelDataset(Dataset):
         return feature_x.numpy(), feature_y.numpy(), label, speaker
 
     def collate_fn(self, samples):
-        return zip(*samples)
+        
+        features_x, features_y, labels, speakers = [], [], [], []
+
+        for feature_x, feature_y, label, speaker in samples:
+            features_x.append(feature_x), features_y, labels, speakers
+            features_y.append(feature_y)
+            labels.append(label)
+            speakers.append(speaker)
+
+        return features_x, features_y, labels, speakers
 
     def _getdatalist(self, base_path, seen_splits, unseen_splits, choices, model):
         data_list = []

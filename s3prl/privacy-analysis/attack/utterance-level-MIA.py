@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from dataset.dataset import UtteranceLevelDataset
 from utils.utils import compute_utterance_adversarial_advantage_by_percentile, compute_utterance_adversarial_advantage_by_ROC
+from utils.utils import compute_speaker_adversarial_advantage_by_percentile, compute_speaker_adversarial_advantage_by_ROC
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -49,7 +50,7 @@ def main(args):
     context_level_sim = []
 
     # seen data
-    for batch_id, (utterance_features) in enumerate(
+    for batch_id, (utterance_features, utterances) in enumerate(
         tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
     ):
         for utterance_feature in utterance_features:
@@ -58,7 +59,7 @@ def main(args):
             context_level_sim.append(np.mean(sim))
 
     # unseen data
-    for batch_id, (utterance_features) in enumerate(
+    for batch_id, (utterance_features, utterances) in enumerate(
         tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
     ):
         for utterance_feature in utterance_features:
@@ -72,7 +73,10 @@ def main(args):
     seen_uttr_sim = context_level_sim[:CHOICE_SIZE]
     unseen_uttr_sim = context_level_sim[CHOICE_SIZE:]
 
-    TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+    if np.mean(unseen_uttr_sim) <= 0.5:
+        TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+    else:
+        TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
 
     df = pd.DataFrame(
         {
@@ -87,7 +91,10 @@ def main(args):
         index=False,
     )
 
-    TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
+    if np.mean(unseen_uttr_sim) <= 0.5:
+        TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
+    else:
+        TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
 
     plt.figure()
     plt.rcParams.update({"font.size": 12})
