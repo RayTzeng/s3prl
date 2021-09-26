@@ -4,48 +4,61 @@ import random
 
 import numpy as np
 import torch
-import pandas as pd
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import pandas as pd
+import IPython
 
-from dataset.dataset import SpeakerLevelDataset, CertainSpeakerDataset
-from model.learnable_similarity_model import SpeakerLevelModel
+from dataset.dataset import UtteranceLevelDataset, CertainUtteranceDataset
+from model.learnable_similarity_model import UtteranceLevelModel
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main(args):
-    random.seed()
+    if args.seed is not None:
+        random.seed(args.seed)
+    else:
+        random.seed()
     AUXILIARY_DATA_SIZE = args.auxiliary_data_choice_size
 
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
 
-    if args.speaker_list is not None:
-        print("Using speaker list....")
-        df = pd.read_csv(args.speaker_list, index_col=False)
-        speakers = df['Unseen_spkr'].values
+    if args.utterance_list is not None:
+        print("Using utterance list....")
+        df = pd.read_csv(args.utterance_list, index_col=False)
+        utterances = df['Unseen_uttr'].values
         similarity = df['Similarity'].values
-        sorted_similarity, sorted_speakers = zip(*sorted(zip(similarity, speakers)))
+        sorted_similarity, sorted_utterances = zip(*sorted(zip(similarity, utterances)))
         sorted_similarity = list(sorted_similarity)
-        sorted_speakers = list(sorted_speakers)
-        negative_speakers = sorted_speakers[:AUXILIARY_DATA_SIZE]
-        positive_speakers = sorted_speakers[-AUXILIARY_DATA_SIZE:]
-        train_dataset = CertainSpeakerDataset(
-            args.base_path, positive_speakers, negative_speakers, args.model
+        sorted_utterances = list(sorted_utterances)
+
+        if np.mean(sorted_similarity) > 0.5:
+            # large to small
+            sorted_similarity.reverse()
+            sorted_utterances.reverse()
+
+        # IPython.embed()
+        # larger value (negative sample) needs to be closer to 1
+        negative_utterances = sorted_utterances[-AUXILIARY_DATA_SIZE:]
+        # smaller value (positive sample) needs to be closer to 0
+        positive_utterances = sorted_utterances[:AUXILIARY_DATA_SIZE]
+        train_dataset = CertainUtteranceDataset(
+            args.base_path, positive_utterances, negative_utterances, args.model
         )
 
-        eval_negative_speakers = sorted_speakers[AUXILIARY_DATA_SIZE:2*AUXILIARY_DATA_SIZE]
-        eval_positive_speakers = sorted_speakers[-2*AUXILIARY_DATA_SIZE:-AUXILIARY_DATA_SIZE]
-        eval_dataset = CertainSpeakerDataset(
-            args.base_path, eval_positive_speakers, eval_negative_speakers, args.model
+        eval_negative_utterances = sorted_utterances[-2*AUXILIARY_DATA_SIZE:-AUXILIARY_DATA_SIZE]
+        eval_positive_utterances = sorted_utterances[AUXILIARY_DATA_SIZE:2*AUXILIARY_DATA_SIZE]
+        eval_dataset = CertainUtteranceDataset(
+            args.base_path, eval_positive_utterances, eval_negative_utterances, args.model
         )
 
     else:
-        train_dataset = SpeakerLevelDataset(
+        train_dataset = UtteranceLevelDataset(
             args.base_path, seen_splits, unseen_splits, AUXILIARY_DATA_SIZE, args.model
         )
-        eval_dataset = SpeakerLevelDataset(
+        eval_dataset = UtteranceLevelDataset(
             args.base_path, seen_splits, unseen_splits, AUXILIARY_DATA_SIZE, args.model
         )
 
@@ -64,13 +77,13 @@ def main(args):
         collate_fn=eval_dataset.collate_fn,
     )
 
-    feature, _, _, _ = train_dataset[0]
+    feature, _ = train_dataset[0]
     input_dim = feature.shape[-1]
     # input_dim = 768
     print(f"input dimension: {input_dim}")
 
-    model = SpeakerLevelModel(input_dim).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    model = UtteranceLevelModel(input_dim).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     criterion = torch.nn.BCEWithLogitsLoss()
 
     min_loss = 1000
@@ -78,18 +91,14 @@ def main(args):
     epoch = 0
     while epoch < args.n_epochs:
         model.train()
-        for batch_id, (features_x, features_y, labels, speakers) in enumerate(
+        for batch_id, (features, labels) in enumerate(
             tqdm(train_dataloader, dynamic_ncols=True, desc=f"Train | Epoch {epoch+1}")
         ):
-            optimizer.zero_grad()
-            features_x = [
-                torch.FloatTensor(feature).to(device) for feature in features_x
-            ]
-            features_y = [
-                torch.FloatTensor(feature).to(device) for feature in features_y
+            features = [
+                torch.FloatTensor(feature).to(device) for feature in features
             ]
             labels = torch.FloatTensor([label for label in labels]).to(device)
-            pred = model(features_x, features_y)
+            pred = model(features)
             loss = criterion(pred, labels)
             loss.backward()
             optimizer.step()
@@ -107,18 +116,15 @@ def main(args):
 
         model.eval()
         total_loss = []
-        for batch_id, (features_x, features_y, labels, speakers) in enumerate(
+        for batch_id, (features, labels) in enumerate(
             tqdm(eval_dataloader, dynamic_ncols=True, desc="Eval")
         ):
-            features_x = [
-                torch.FloatTensor(feature).to(device) for feature in features_x
-            ]
-            features_y = [
-                torch.FloatTensor(feature).to(device) for feature in features_y
+            features = [
+                torch.FloatTensor(feature).to(device) for feature in features
             ]
             labels = torch.FloatTensor([label for label in labels]).to(device)
             with torch.no_grad():
-                pred = model(features_x, features_y)
+                pred = model(features)
 
             loss = criterion(pred, labels)
             total_loss.append(loss.detach().cpu().item())
@@ -167,7 +173,7 @@ if __name__ == "__main__":
     )
     # parser.add_argument("--seed", type=int, default=57, help="random seed")
     parser.add_argument(
-        "--auxiliary_data_choice_size", type=int, default=10, help="how many speaker to pick"
+        "--auxiliary_data_choice_size", type=int, default=1000, help="how many utterance to pick"
     )
     parser.add_argument(
         "--train_batch_size", type=int, default=32, help="training batch size"
@@ -176,10 +182,12 @@ if __name__ == "__main__":
         "--eval_batch_size", type=int, default=32, help="evaluation batch size"
     )
     parser.add_argument(
-        "--speaker_list", type=str, default=None, help="certain speaker list"
+        "--utterance_list", type=str, default=None, help="certain utterance list"
     )
     parser.add_argument("--n_epochs", type=int, default=30, help="training epoch")
     parser.add_argument("--num_workers", type=int, default=2, help="number of workers")
+    parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+    parser.add_argument("--seed", type=int, default=None, help="random seed")
     args = parser.parse_args()
 
     main(args)

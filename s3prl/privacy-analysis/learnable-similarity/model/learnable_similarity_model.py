@@ -75,6 +75,35 @@ class SpeakerLevelModel(nn.Module):
         return sim
 
 
+class UtteranceLevelModel(nn.Module):
+    def __init__(self, input_dim):
+        super(UtteranceLevelModel, self).__init__()
+        self.pooling = SelfAttentionPooling(input_dim)
+        self.linear = nn.Linear(input_dim, input_dim)
+        self.output = nn.Linear(input_dim, 1)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(p=0.2)
+        
+
+    def forward(self, features):
+        device = features[0].device
+        lengths = torch.LongTensor([len(feature) for feature in features]).to(
+            device
+        )
+        features_padding_mask = ~torch.lt(
+            torch.arange(max(lengths)).unsqueeze(0).to(device),
+            lengths.unsqueeze(1),
+        )
+        padded_features = pad_sequence(features, batch_first=True)
+
+        feature = self.pooling(padded_features, features_padding_mask)
+        feature = self.linear(feature)
+        feature = self.relu(self.dropout(feature))
+        sim = self.output(feature)
+        sim = sim.squeeze()
+
+        return sim
+
 # class UtteranceLevelModel(nn.Module):
 #     def __init__(self, input_dim):
 #         super(Model, self).__init__()

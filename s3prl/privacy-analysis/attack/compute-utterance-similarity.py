@@ -10,10 +10,10 @@ from matplotlib import pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from collections import defaultdict
 
 from dataset.dataset import UtteranceLevelDataset
 from utils.utils import compute_utterance_adversarial_advantage_by_percentile, compute_utterance_adversarial_advantage_by_ROC
-from utils.utils import compute_speaker_adversarial_advantage_by_percentile, compute_speaker_adversarial_advantage_by_ROC
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -47,79 +47,65 @@ def main(args):
         collate_fn=unseen_dataset.collate_fn,
     )
 
-    context_level_sim = []
+    intra_seen_utterance_sim = defaultdict(float)
 
     # seen data
     for batch_id, (utterance_features, utterances) in enumerate(
-        tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
+        tqdm(seen_dataloader, dynamic_ncols=True, desc="Unseen")
     ):
-        for utterance_feature in utterance_features:
+        for i in range(len(utterances)):
+            utterance_feature = utterance_features[i]
             sim = cosine_similarity(utterance_feature)
             sim = sim[np.triu_indices(len(sim), k=1)]
-            context_level_sim.append(np.mean(sim))
+            intra_seen_utterance_sim[utterances[i]] = np.mean(sim)
 
-    # unseen data
+    seen_uttr_sim = []
+    seen_uttr_list = []
+    for k, v in intra_seen_utterance_sim.items():
+        seen_uttr_sim.append(v)
+        seen_uttr_list.append(k)
+
+    df = pd.DataFrame(
+        {
+            "Seen_uttr": seen_uttr_list,
+            "Similarity": seen_uttr_sim
+        }
+    )
+    df.to_csv(
+        os.path.join(args.output_path, f"{args.model}-seen-utterance-similarity.csv"),
+        index=False,
+    )
+
+
+
+    intra_unseen_utterance_sim = defaultdict(float)
+    # seen data
     for batch_id, (utterance_features, utterances) in enumerate(
         tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
     ):
-        for utterance_feature in utterance_features:
+        for i in range(len(utterances)):
+            utterance_feature = utterance_features[i]
             sim = cosine_similarity(utterance_feature)
             sim = sim[np.triu_indices(len(sim), k=1)]
-            context_level_sim.append(np.mean(sim))
+            intra_unseen_utterance_sim[utterances[i]] = np.mean(sim)
 
-    # apply attack
-    percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
-
-    seen_uttr_sim = context_level_sim[:CHOICE_SIZE]
-    unseen_uttr_sim = context_level_sim[CHOICE_SIZE:]
-
-    if np.mean(unseen_uttr_sim) <= 0.5:
-        TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
-    else:
-        TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+    unseen_uttr_sim = []
+    unseen_uttr_list = []
+    for k, v in intra_unseen_utterance_sim.items():
+        unseen_uttr_sim.append(v)
+        unseen_uttr_list.append(k)
 
     df = pd.DataFrame(
         {
-            "Percentile": percentile_choice,
-            "True Positive Rate": TPR,
-            "False Positive Rate": FPR,
-            "Adversarial Advantage": AA,
+            "Unseen_uttr": unseen_uttr_list,
+            "Similarity": unseen_uttr_sim
         }
     )
     df.to_csv(
-        os.path.join(args.output_path, f"{args.model}-utterance-level-attack-result-by-percentile.csv"),
+        os.path.join(args.output_path, f"{args.model}-unseen-utterance-similarity.csv"),
         index=False,
     )
 
-    if np.mean(unseen_uttr_sim) <= 0.5:
-        TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
-    else:
-        TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
-
-    plt.figure()
-    plt.rcParams.update({"font.size": 12})
-    plt.title(f'Utterance-level attack ROC Curve - {args.model}')
-    plt.plot(FPRs, TPRs, color="darkorange", lw=2, label=f"ROC curve (area = {avg_AUC:0.2f})")
-    plt.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.ylabel('True Positive Rate')
-    plt.xlabel('False Positive Rate')
-    plt.legend(loc="lower right")
-    plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-utterance-level-attack-ROC-curve.png")
-    )
-
-    df = pd.DataFrame(
-        {
-            "Seen_uttr_sim": seen_uttr_sim, 
-            "Unseen_uttr_sim": unseen_uttr_sim
-        }
-    )
-    df.to_csv(
-        os.path.join(args.output_path, f"{args.model}-utterance-level-attack-similarity.csv"),
-        index=False,
-    )
 
 
 if __name__ == "__main__":

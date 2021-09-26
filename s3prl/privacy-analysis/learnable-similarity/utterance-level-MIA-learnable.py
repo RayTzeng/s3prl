@@ -12,8 +12,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from dataset.dataset import UtteranceLevelDataset
+from model.learnable_similarity_model import UtteranceLevelModel
 from utils.utils import compute_utterance_adversarial_advantage_by_percentile, compute_utterance_adversarial_advantage_by_ROC
-from utils.utils import compute_speaker_adversarial_advantage_by_percentile, compute_speaker_adversarial_advantage_by_ROC
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -26,10 +26,10 @@ def main(args):
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
 
     seen_dataset = UtteranceLevelDataset(
-        args.base_path, seen_splits, CHOICE_SIZE, args.model
+        args.base_path, seen_splits, [], CHOICE_SIZE, args.model
     )
     unseen_dataset = UtteranceLevelDataset(
-        args.base_path, unseen_splits, CHOICE_SIZE, args.model
+        args.base_path, [], unseen_splits, CHOICE_SIZE, args.model
     )
 
     seen_dataloader = DataLoader(
@@ -47,25 +47,35 @@ def main(args):
         collate_fn=unseen_dataset.collate_fn,
     )
 
+    ckpt = torch.load(args.sim_model_path)
+    sim_predictor = UtteranceLevelModel(ckpt["linear.weight"].shape[0]).to(device)
+    sim_predictor.load_state_dict(ckpt)
+    sim_predictor.eval()
+
     context_level_sim = []
 
     # seen data
-    for batch_id, (utterance_features, utterances) in enumerate(
-        tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
-    ):
-        for utterance_feature in utterance_features:
-            sim = cosine_similarity(utterance_feature)
-            sim = sim[np.triu_indices(len(sim), k=1)]
-            context_level_sim.append(np.mean(sim))
+    with torch.no_grad():
+        for batch_id, (features, label) in enumerate(
+            tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
+        ):
+            features = [
+                torch.FloatTensor(feature).to(device) for feature in features
+            ]
+            pred = sim_predictor(features)
+            context_level_sim += pred.cpu().tolist()
+            
 
-    # unseen data
-    for batch_id, (utterance_features, utterances) in enumerate(
-        tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
-    ):
-        for utterance_feature in utterance_features:
-            sim = cosine_similarity(utterance_feature)
-            sim = sim[np.triu_indices(len(sim), k=1)]
-            context_level_sim.append(np.mean(sim))
+        # unseen data
+        for batch_id, (features, label) in enumerate(
+            tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
+        ):
+            features = [
+                torch.FloatTensor(feature).to(device) for feature in features
+            ]
+            pred = sim_predictor(features)
+            context_level_sim += pred.cpu().tolist()
+        
 
     # apply attack
     percentile_choice = [10, 20, 30, 40, 50, 60, 70, 80, 90]
@@ -73,10 +83,7 @@ def main(args):
     seen_uttr_sim = context_level_sim[:CHOICE_SIZE]
     unseen_uttr_sim = context_level_sim[CHOICE_SIZE:]
 
-    if np.mean(unseen_uttr_sim) <= 0.5:
-        TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
-    else:
-        TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
+    TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_uttr_sim, unseen_uttr_sim, percentile_choice, args.model)
 
     df = pd.DataFrame(
         {
@@ -91,10 +98,7 @@ def main(args):
         index=False,
     )
 
-    if np.mean(unseen_uttr_sim) <= 0.5:
-        TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
-    else:
-        TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
+    TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_uttr_sim, unseen_uttr_sim, args.model)
 
     plt.figure()
     plt.rcParams.update({"font.size": 12})
@@ -128,6 +132,7 @@ if __name__ == "__main__":
         "--base_path", help="directory of feature of LibriSpeech dataset"
     )
     parser.add_argument("--output_path", help="directory to save the analysis results")
+    parser.add_argument("--sim_model_path", help="path of similarity model")
     parser.add_argument(
         "--model", help="which self-supervised model you used to extract features"
     )

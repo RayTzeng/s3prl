@@ -2,6 +2,22 @@ import numpy as np
 import math
 from sklearn.metrics import confusion_matrix, roc_curve, roc_auc_score
 
+import torch
+import torchaudio
+from functools import partial
+from torch.nn.utils.rnn import pad_sequence
+from torchaudio.transforms import Spectrogram, MelScale, MFCC
+from torchaudio.functional import magphase, compute_deltas
+import yaml
+
+
+
+############
+# CONSTANT #
+############
+N_SAMPLED_PSEUDO_WAV = 2
+SAMPLE_RATE = 16000
+
 
 def compute_speaker_adversarial_advantage_by_percentile(seen_sim, unseen_sim, percentile_choice, model=""):
     adversarial_advantage_by_percentile = []

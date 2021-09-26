@@ -11,9 +11,10 @@ import scikitplot as skplt
 from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from collections import defaultdict
 
-from dataset.dataset import SpeakerLevelDataset
-from utils.utils import compute_speaker_adversarial_advantage_by_percentile, compute_speaker_adversarial_advantage_by_ROC
+from dataset.dataset import SpeakerLevelDatasetByUtterance
+from utils.utils import compute_utterance_adversarial_advantage_by_percentile, compute_utterance_adversarial_advantage_by_ROC
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -25,10 +26,10 @@ def main(args):
     seen_splits = ["train-clean-100"]
     unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
 
-    seen_dataset = SpeakerLevelDataset(
+    seen_dataset = SpeakerLevelDatasetByUtterance(
         args.base_path, seen_splits, CHOICE_SIZE, args.model
     )
-    unseen_dataset = SpeakerLevelDataset(
+    unseen_dataset = SpeakerLevelDatasetByUtterance(
         args.base_path, unseen_splits, CHOICE_SIZE, args.model
     )
 
@@ -47,29 +48,38 @@ def main(args):
         collate_fn=unseen_dataset.collate_fn,
     )
 
-    intra_speaker_sim_mean = []
+    intra_seen_speaker_sim = defaultdict(list)
     colors = []
 
     # seen data
-    for batch_id, (speaker_features, speakers) in enumerate(
+    for batch_id, (utterance_features, utterances) in enumerate(
         tqdm(seen_dataloader, dynamic_ncols=True, desc="Seen")
     ):
-        for speaker_feature in speaker_features:
-            # IPython.embed()
-            sim = cosine_similarity(speaker_feature)
+        for i, utterance_feature in enumerate(utterance_features):
+            speaker = utterances[i].split("/")[-3]
+            sim = cosine_similarity(utterance_feature)
             sim = sim[np.triu_indices(len(sim), k=1)]
-            intra_speaker_sim_mean.append(np.mean(sim))
-            colors.append("blue")
+            intra_seen_speaker_sim[speaker].append(np.mean(sim))
+
+    intra_unseen_speaker_sim = defaultdict(list)
 
     # unseen data
-    for batch_id, (speaker_features, speakers) in enumerate(
+    for batch_id, (utterance_features, utterances) in enumerate(
         tqdm(unseen_dataloader, dynamic_ncols=True, desc="Unseen")
     ):
-        for speaker_feature in speaker_features:
-            sim = cosine_similarity(speaker_feature)
+        for i, utterance_feature in enumerate(utterance_features):
+            speaker = utterances[i].split("/")[-3]
+            sim = cosine_similarity(utterance_feature)
             sim = sim[np.triu_indices(len(sim), k=1)]
-            intra_speaker_sim_mean.append(np.mean(sim))
-            colors.append("red")
+            intra_unseen_speaker_sim[speaker].append(np.mean(sim))
+
+    intra_speaker_sim_mean = []
+    
+    for k, v in intra_seen_speaker_sim.items():
+        intra_speaker_sim_mean.append(np.mean(v))
+        
+    for k, v in intra_unseen_speaker_sim.items():
+        intra_speaker_sim_mean.append(np.mean(v))
 
     plt.figure(figsize=(80, 40))
     plt.rcParams.update({"font.size": 40})
@@ -112,7 +122,7 @@ def main(args):
     seen_spkr_sim = intra_speaker_sim_mean[:CHOICE_SIZE]
     unseen_spkr_sim = intra_speaker_sim_mean[CHOICE_SIZE:]
     
-    TPR, FPR, AA = compute_speaker_adversarial_advantage_by_percentile(seen_spkr_sim, unseen_spkr_sim, percentile_choice, args.model)
+    TPR, FPR, AA = compute_utterance_adversarial_advantage_by_percentile(seen_spkr_sim, unseen_spkr_sim, percentile_choice, args.model)
 
     df = pd.DataFrame(
         {
@@ -123,11 +133,11 @@ def main(args):
         }
     )
     df.to_csv(
-        os.path.join(args.output_path, f"{args.model}-speaker-level-attack-result-by-percentile.csv"),
+        os.path.join(args.output_path, f"{args.model}-speaker-level-by-utterance-attack-result-by-percentile.csv"),
         index=False,
     )
 
-    TPRs, FPRs, avg_AUC = compute_speaker_adversarial_advantage_by_ROC(seen_spkr_sim, unseen_spkr_sim, args.model)
+    TPRs, FPRs, avg_AUC = compute_utterance_adversarial_advantage_by_ROC(seen_spkr_sim, unseen_spkr_sim, args.model)
 
     plt.figure()
     plt.rcParams.update({"font.size": 12})
@@ -140,7 +150,7 @@ def main(args):
     plt.xlabel('False Positive Rate')
     plt.legend(loc="lower right")
     plt.savefig(
-        os.path.join(args.output_path, f"{args.model}-speaker-level-attack-ROC-curve.png")
+        os.path.join(args.output_path, f"{args.model}-speaker-level-by-utterance-attack-ROC-curve.png")
     )
 
     df = pd.DataFrame(
@@ -150,7 +160,7 @@ def main(args):
         }
     )
     df.to_csv(
-        os.path.join(args.output_path, f"{args.model}-speaker-level-attack-similarity.csv"),
+        os.path.join(args.output_path, f"{args.model}-speaker-level-by-utterance-attack-similarity.csv"),
         index=False,
     )
 
@@ -170,7 +180,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--speaker_choice_size", type=int, default=100, help="how many speaker to pick"
     )
-    parser.add_argument("--batch_size", type=int, default=1, help="batch size")
+    parser.add_argument("--batch_size", type=int, default=64, help="batch size")
     parser.add_argument("--num_workers", type=int, default=4, help="number of workers")
     args = parser.parse_args()
 
