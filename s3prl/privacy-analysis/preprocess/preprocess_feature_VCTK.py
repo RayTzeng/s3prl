@@ -22,6 +22,7 @@ def main(args):
         args.output_name = args.model
     
     if args.state_dict:
+        print("Load state dict.")
         if 'tera' in args.model:
             options = {
                 "load_pretrain": "True",
@@ -50,23 +51,23 @@ def main(args):
 
     print(output_prefix)
 
-    #split_path = os.path.join(args.base_path, args.split)
+    split_path = os.path.join(args.base_path, args.split)
     
     speaker_count = 0
     audio_count = 0
-    for speaker in tqdm(glob.glob(os.path.join(args.base_path, 'p*')), ascii=True, desc="Speaker"):
+    for speaker in tqdm(glob.glob(os.path.join(split_path, 'p*')), ascii=True, desc="Speaker"):
         speaker_count += 1
         #for chapter in glob.glob(os.path.join(split_path, speaker, '*')):
 
         # check if output folder exist
-        output_folder = os.path.join(args.output_path, speaker.split("/")[-1])
+        output_folder = os.path.join(args.output_path, args.split, speaker.split("/")[-1])
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
             tqdm.write(f"Directory {output_folder} Created ")
 
             # 
         with torch.no_grad():
-            for audio_path in sorted(glob.glob(os.path.join(args.base_path, speaker, '*.wav')))[:100]:
+            for audio_path in sorted(glob.glob(os.path.join(split_path, speaker, '*.wav')))[:100]:
                 audio_count += 1
 
                 audio_name = audio_path.split("/")[-1]
@@ -82,7 +83,7 @@ def main(args):
                 wav = wav.squeeze(0).to(device)
                 
                 feature = model([wav])['last_hidden_state']
-                output_path = os.path.join(args.output_path, speaker.split("/")[-1], f"{output_prefix}-{audio_name}.pt")
+                output_path = os.path.join(output_folder, f"{output_prefix}-{audio_name}.pt")
                 tqdm.write(output_path)
                 torch.save(feature.cpu(), output_path)
                 
@@ -98,6 +99,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_path", help="directory of LibriSpeech dataset")
+    parser.add_argument("--split", default='wav48')
     parser.add_argument("--state_dict", help='pre-trained state dict path')
     parser.add_argument("--model_cfg", help = "pre-trained model config path")
     parser.add_argument("--output_path", help="directory to save feautures")

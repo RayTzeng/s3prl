@@ -29,12 +29,13 @@ class SpeakerLevelDataset(Dataset):
 
     def __getitem__(self, idx):
         speaker_feature = []
-        for chapter in glob.glob(os.path.join(self.speakers[idx], "*")):
-            for feature_path in glob.glob(os.path.join(chapter, f"{self.model}-*")):
-                feature = torch.load(feature_path).detach().cpu()
-                feature = feature.squeeze()
-                speaker_feature.append(np.array(feature).mean(axis=0))
-        # print(len(speaker_feature))
+        for feature_path in glob.glob(os.path.join(self.speakers[idx], "**", f"{self.model}-*"), recursive=True):
+            #print(feature_path)
+            #for feature_path in glob.glob(os.path.join(chapter, f"{self.model}-*")):
+            feature = torch.load(feature_path).detach().cpu()
+            feature = feature.squeeze()
+            speaker_feature.append(np.array(feature).mean(axis=0))
+        #print(len(speaker_feature))
         return speaker_feature, self.speakers[idx]
         
     def collate_fn(self, samples):
@@ -52,7 +53,7 @@ class SpeakerLevelDataset(Dataset):
             
             speaker_list += analyze_speakers
             
-        # print(len(speaker_list))
+        #print(speaker_list)
         return speaker_list
 
 
@@ -82,9 +83,9 @@ class UtteranceLevelDataset(Dataset):
             split_utterance_list = []
             for speaker in glob.glob(os.path.join(split_path, "*[!.txt]")):
                 speaker_features = []
-                for chapter in glob.glob(os.path.join(speaker, "*")):
-                    for feature_path in glob.glob(os.path.join(chapter, f"{model}-*")):
-                        split_utterance_list.append(feature_path)
+                for feature_path in glob.glob(os.path.join(speaker, "**", f"{model}-*"), recursive=True):
+                #for feature_path in glob.glob(os.path.join(chapter, f"{model}-*")):
+                    split_utterance_list.append(feature_path)
             utterance_list += random.sample(split_utterance_list, k=min(split_choice, len(split_utterance_list)))
             
         # print(len(speaker_list))
@@ -116,9 +117,9 @@ class SpeakerLevelDatasetByUtterance(Dataset):
             all_speakers = glob.glob(os.path.join(split_path, "*[!.txt]"))
             analyze_speakers = random.sample(all_speakers, k=min(split_choice, len(all_speakers)))
             for speaker in analyze_speakers:
-                for chapter in glob.glob(os.path.join(speaker, "*")):
-                    for feature_path in glob.glob(os.path.join(chapter, f"{model}-*")):
-                        utterance_list.append(feature_path)
+                for feature_path in glob.glob(os.path.join(speaker, "**", f"{model}-*"), recursive=True):
+                    #for feature_path in glob.glob(os.path.join(chapter, f"{model}-*")):
+                    utterance_list.append(feature_path)
             
         # print(len(speaker_list))
         return utterance_list
