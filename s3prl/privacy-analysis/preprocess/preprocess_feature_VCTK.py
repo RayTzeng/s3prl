@@ -1,0 +1,112 @@
+import os
+import glob
+import argparse
+import time
+from tqdm import tqdm
+
+import torch
+import torch.nn as nn
+import numpy as np
+import torchaudio
+from torchaudio.sox_effects import apply_effects_file
+from torch.utils.data.dataset import Dataset
+from torch.utils.data import DataLoader
+from s3prl.upstream.tera.expert import UpstreamExpert
+import IPython
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def main(args):
+    if not args.output_name:
+        args.output_name = args.model
+    
+    if args.state_dict:
+        if 'tera' in args.model:
+            options = {
+                "load_pretrain": "True",
+                "no_grad": "False",
+                "dropout": "default",
+                "spec_aug": "False",
+                "spec_aug_prev": "True",
+                "output_hidden_states": "True",
+                "permute_input": "False",
+            }
+            model = UpstreamExpert(ckpt = args.state_dict)
+    else:
+        print(args.config)
+        if args.config is not None:
+            model = torch.hub.load('s3prl/s3prl', args.model, model_config=args.config).to(device)
+        else:
+            model = torch.hub.load('s3prl/s3prl', args.model).to(device)
+    model = model.to(device)
+    model.eval()
+
+    print(args.output_prefix)
+    if args.output_prefix is not None:
+        output_prefix = args.output_prefix
+    else:
+        output_prefix = args.model
+
+    print(output_prefix)
+
+    #split_path = os.path.join(args.base_path, args.split)
+    
+    speaker_count = 0
+    audio_count = 0
+    for speaker in tqdm(glob.glob(os.path.join(args.base_path, 'p*')), ascii=True, desc="Speaker"):
+        speaker_count += 1
+        #for chapter in glob.glob(os.path.join(split_path, speaker, '*')):
+
+        # check if output folder exist
+        output_folder = os.path.join(args.output_path, speaker.split("/")[-1])
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+            tqdm.write(f"Directory {output_folder} Created ")
+
+            # 
+        with torch.no_grad():
+            for audio_path in sorted(glob.glob(os.path.join(args.base_path, speaker, '*.wav')))[:100]:
+                audio_count += 1
+
+                audio_name = audio_path.split("/")[-1]
+
+                wav, _ = apply_effects_file(
+                    audio_path,
+                    [
+                        ["channels", "1"],
+                        ["rate", "16000"],
+                        ["norm"],
+                    ],
+                )
+                wav = wav.squeeze(0).to(device)
+                
+                feature = model([wav])['last_hidden_state']
+                output_path = os.path.join(args.output_path, speaker.split("/")[-1], f"{output_prefix}-{audio_name}.pt")
+                tqdm.write(output_path)
+                torch.save(feature.cpu(), output_path)
+                
+                
+
+    print("There are {} speakers".format(speaker_count))
+    print("There are {} audios".format(audio_count))
+
+
+
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base_path", help="directory of LibriSpeech dataset")
+    parser.add_argument("--state_dict", help='pre-trained state dict path')
+    parser.add_argument("--model_cfg", help = "pre-trained model config path")
+    parser.add_argument("--output_path", help="directory to save feautures")
+    parser.add_argument("--output_name", help="filename to save")
+    parser.add_argument("--model", help="which self-supervised model to extract features")
+    parser.add_argument("--output_prefix", default=None, help="output prefix")
+    parser.add_argument("--config", default=None, help="config")
+    args = parser.parse_args()
+
+    
+
+    main(args)
