@@ -34,10 +34,6 @@ def main(args):
         sorted_similarity = list(sorted_similarity)
         sorted_utterances = list(sorted_utterances)
 
-        if np.mean(sorted_similarity) > 0.5:
-            # large to small
-            sorted_similarity.reverse()
-            sorted_utterances.reverse()
 
         # IPython.embed()
         # larger value (negative sample) needs to be closer to 1
