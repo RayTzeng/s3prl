@@ -24,7 +24,11 @@ def main(args):
     CHOICE_SIZE = args.speaker_choice_size
 
     seen_splits = ["train-clean-100"]
-    unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
+    if args.unseen == 'LibriSpeech':
+        unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
+    elif args.unseen == 'VCTK':
+        unseen_splits = ['wav48']
+    #unseen_splits = ["test-clean", "test-other", "dev-clean", "dev-other"]
 
     seen_dataset = SpeakerLevelDataset(
         args.base_path, seen_splits, CHOICE_SIZE, args.model
@@ -117,6 +121,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base_path", help="directory of feature of LibriSpeech dataset"
+    )
+    parser.add_argument(
+        "--unseen", default="LibriSpeech", help="unseen data to use (LibriSpeech or VCTK)"
     )
     parser.add_argument("--output_path", help="directory to save the analysis results")
     parser.add_argument(
