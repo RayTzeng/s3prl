@@ -1,22 +1,34 @@
 import warnings
 from collections import defaultdict
 from pathlib import Path
+import os
+import json
 
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr
+from sklearn.utils import class_weight
+from sklearn.linear_model import LinearRegression
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed import is_initialized
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, ConcatDataset
 from tqdm import tqdm
 import pdb
 
-from .dataset import VoiceMOSDataset
+from .dataset import VoiceMOSDataset, VoiceMOSLDScoreDataset
 from .model import Model
 
 warnings.filterwarnings("ignore")
+
+TRUE_SCORE_IDX=0
+PRED_SCORE_IDX=1
+WAV_NAME_IDX=2
+
+JUDGE=4
+SCORE=2
 
 
 class DownstreamExpert(nn.Module):
@@ -26,63 +38,173 @@ class DownstreamExpert(nn.Module):
         self.datarc = downstream_expert["datarc"]
         self.modelrc = downstream_expert["modelrc"]
         self.expdir = kwargs["expdir"]
-        idtable = Path(kwargs["expdir"]) / "idtable.pkl"
-
-        self.train_dataset = VoiceMOSDataset(
-            load_file(self.datarc["voiceMOS_path"], "sets/TRAINSET"),
-            load_file(self.datarc["voiceMOS_path"], "sets/train_mos_list.txt"),
-            self.datarc["voiceMOS_path"],
-            idtable=idtable,
-        )
-        self.dev_dataset = VoiceMOSDataset(
-            load_file(self.datarc["voiceMOS_path"], "sets/DEVSET"),
-            load_file(self.datarc["voiceMOS_path"], "sets/val_mos_list.txt"),
-            self.datarc["voiceMOS_path"],
-            idtable=idtable,
-            valid=True,
-        )
-        self.test_dataset = VoiceMOSDataset(
-            load_file(self.datarc["voiceMOS_path"], "sets/DEVSET"),
-            load_file(self.datarc["voiceMOS_path"], "sets/val_mos_list.txt"),
-            self.datarc["voiceMOS_path"],
-            idtable=idtable,
-            valid=True,
-        )
-
-        self.system_mos = pd.read_csv(
-            Path(
-                self.datarc["voiceMOS_path"],
-                "system_level_mos.csv",
-            ),
-            index_col=False
-        )
 
 
+        # Generate or load idtable
+        if Path(kwargs["expdir"], "idtable.pkl").is_file():
+            idtable_path = str(Path(kwargs["expdir"], "idtable.pkl"))
+            print(f"[Dataset Information] - Found existing idtable at {idtable_path}")
+            self.idtable = Path(idtable_path)
+        elif Path(self.datarc['idtable']).is_file():
+            print(f"[Dataset Information] - Found existing idtable at {self.datarc['idtable']}")
+            self.idtable = Path(self.datarc['idtable'])
+        else:
+            print(f"[Dataset Information] - Generate new idtable")
+            self.idtable = Path(kwargs["expdir"]) / "idtable.pkl"
+            self.gen_idtable(self.idtable)
+
+        
+        # Load dataset
+        self.train_dataset = []
+        self.train_eval_dataset = []
+        self.dev_dataset = []
+        self.test_dataset = []
+        self.system_mos = {}
+        self.best = {}
+        self.record_names = ['mean_score', 'reg_score', 'class_score']
+
+        print(f"[Dataset Information] - Using dataset {self.datarc['corpus_names']}")
+
+        for i, (data_folder, corpus_name) in enumerate(zip(self.datarc['data_folders'], self.datarc['corpus_names'])):
+            perturbrc = self.datarc['perturb']
+
+            print(f"[Dataset Information] - [Train split]")
+            train_mos_df = load_file(data_folder, self.datarc["train_mos_list_path"])
+            train_ld_score_df = load_file(data_folder, self.datarc["train_ld_score_list_path"])
+            train_wav_folder = Path(data_folder) / 'wav'
+            train_mos_length = len(train_ld_score_df) if self.datarc["ld_score_bool"] else -1
+
+            self.train_dataset.append(VoiceMOSDataset(mos_list=train_mos_df, 
+                                                    ld_score_list=train_ld_score_df,
+                                                    wav_folder=train_wav_folder, 
+                                                    corpus_name=corpus_name, 
+                                                    perturb_mode=perturbrc["mode"], 
+                                                    perturb_types=perturbrc["types"], 
+                                                    perturb_ratios=perturbrc["ratios"],
+                                                    total_length=train_mos_length
+                                                    ))
+
+            if self.datarc["ld_score_bool"]:
+                self.train_dataset.append(VoiceMOSLDScoreDataset(ld_score_list=train_ld_score_df, 
+                                                        wav_folder=train_wav_folder, 
+                                                        corpus_name=corpus_name, 
+                                                        perturb_mode=perturbrc["mode"], 
+                                                        perturb_types=perturbrc["types"], 
+                                                        perturb_ratios=perturbrc["ratios"],
+                                                        idtable=self.idtable
+                                                        ))
+
+            self.train_eval_dataset.append(VoiceMOSDataset(mos_list=train_mos_df, 
+                                                    ld_score_list=train_ld_score_df,
+                                                    wav_folder=train_wav_folder, 
+                                                    corpus_name=corpus_name, 
+                                                    ))
+
+            print(f"[Dataset Information] - [Valid split]")
+            valid_mos_df = load_file(data_folder, self.datarc["val_mos_list_path"])
+            valid_ld_score_df = load_file(data_folder, self.datarc["val_ld_score_list_path"])
+            valid_wav_folder = Path(data_folder) / 'wav'
+
+            self.dev_dataset.append(VoiceMOSDataset(mos_list=valid_mos_df, 
+                                                    ld_score_list=valid_ld_score_df,
+                                                    wav_folder=valid_wav_folder, 
+                                                    corpus_name=corpus_name, 
+                                                    ))
+
+            print(f"[Dataset Information] - [Test split]")
+            test_mos_df = load_file(data_folder, self.datarc["test_mos_list_path"])
+            test_wav_folder = self.datarc['test_wav_folders'][i] if (len(self.datarc['test_wav_folders']) == len(self.datarc['data_folders'])) else (Path(data_folder) / 'wav')
+
+            self.test_dataset.append(VoiceMOSDataset(mos_list=test_mos_df, 
+                                                    ld_score_list=None,
+                                                    wav_folder=test_wav_folder, 
+                                                    corpus_name=corpus_name, 
+                                                    valid=True
+                                                    ))
+
+            self.system_mos[corpus_name] = pd.read_csv(Path(data_folder, "system_level_mos.csv"), index_col=False)
+            
+        self.collate_fn = self.train_dataset[0].collate_fn
+
+        # Define Evaluation Metrics
+        if Path(self.expdir, "best.pkl").is_file():
+            with open(Path(self.expdir, "best.pkl"), "r") as f:
+                self.best = f.read()
+        else:
+            for corpus_name in self.datarc["corpus_names"]:
+                self.best[corpus_name] = {
+                    "MSE": 10000,
+                    "SRCC": -1.0,
+                    "LCC": -1.0,
+                }
+            self.best["step"] = 0
+            self.best["dev_loss"] = 10000
+
+        # Create directory for saving prediction files
+        for corpus_name in self.datarc["corpus_names"]:
+            for record_name in self.record_names:
+                os.makedirs(Path(self.expdir, corpus_name, record_name), exist_ok=True)
+
+        # build downstream models
         self.connector = nn.Linear(upstream_dim, self.modelrc["projector_dim"])
         self.model = Model(
-            input_dim=self.modelrc["projector_dim"],
-            clipping=self.modelrc["clipping"] if "clipping" in self.modelrc else False,
-            attention_pooling=self.modelrc["attention_pooling"]
-            if "attention_pooling" in self.modelrc
-            else False,
-            num_judges=5000,
+            input_size=self.modelrc["projector_dim"],
+            regression_output_size=1,
+            classification_output_size=5,
+            pooling_name=self.modelrc["pooling_name"],
+            dim=self.modelrc["dim"],
+            dropout=self.modelrc["dropout"],
+            activation=self.modelrc["activation"]
         )
-        self.objective = nn.MSELoss()
-        self.segment_weight = self.modelrc["segment_weight"]
-        self.bias_weight = self.modelrc["bias_weight"]
+        self.post_projector = {}
 
-        self.best_scores = {
-            "dev_MSE": np.inf,
-            "dev_LCC": -np.inf,
-            "dev_SRCC": -np.inf,
-        }
+        print('[Model Information] - Printing downstream model information')
+        print(self.model)
+
+
+        # Calculate class weight for CrossEntropyLoss
+        scores = []
+        for data_folder in self.datarc['data_folders']:
+            ld_score_list = load_file(data_folder, self.datarc["train_ld_score_list_path"])
+            scores += list(ld_score_list[SCORE])
+
+        # Initialize CrossEntropyLoss
+        class_weights = self.calc_class_weight(scores)
+        self.classification_objective = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights))
+        self.classification_weight = self.modelrc['classification_weight']
+
+        # Initialize Regression loss
+        self.regression_objective = eval(f"nn.{self.modelrc['regression_objective']}")()
+        self.regression_weight = self.modelrc['regression_weight']
+        
+
+
+    def gen_idtable(self, idtable_path):
+        idtable = {}
+        count = 1
+        for data_folder in self.datarc['data_folders']:
+            ld_score_list = load_file(data_folder, self.datarc["train_ld_score_list_path"])
+            for i, judge_i in enumerate(ld_score_list[JUDGE]):
+                if judge_i not in idtable.keys():
+                    idtable[judge_i] = count
+                    count += 1
+
+        torch.save(idtable, idtable_path)
+    
+    def calc_class_weight(self, scores):
+        class_weights = class_weight.compute_class_weight('balanced', classes=np.linspace(1,5,5),y=np.array(scores))
+        return class_weights
 
     # Interface
     def get_dataloader(self, mode):
         if mode == "train":
-            return self._get_train_dataloader(self.train_dataset)
-        elif mode == "dev" or mode == "test":
-            return self._get_eval_dataloader(self.dev_dataset)
+            return self._get_train_dataloader(ConcatDataset(self.train_dataset))
+        elif mode == "train_eval":
+            return self._get_eval_dataloader(ConcatDataset(self.train_eval_dataset))
+        elif mode == "dev":
+            return self._get_eval_dataloader(ConcatDataset(self.dev_dataset))
+        elif mode == "test":
+            return self._get_eval_dataloader(ConcatDataset(self.test_dataset))
 
 
 
@@ -94,7 +216,7 @@ class DownstreamExpert(nn.Module):
             shuffle=(sampler is None),
             sampler=sampler,
             num_workers=self.datarc["num_workers"],
-            collate_fn=dataset.collate_fn,
+            collate_fn=self.collate_fn,
         )
 
     def _get_eval_dataloader(self, dataset):
@@ -103,7 +225,7 @@ class DownstreamExpert(nn.Module):
             batch_size=self.datarc["eval_batch_size"],
             shuffle=False,
             num_workers=self.datarc["num_workers"],
-            collate_fn=dataset.collate_fn,
+            collate_fn=self.collate_fn,
         )
 
     # Interface
@@ -112,109 +234,50 @@ class DownstreamExpert(nn.Module):
         mode,
         features,
         system_name_list,
-        prefix_sums,
-        opinion_score_list,
-        mos_list,
-        segment_judge_ids,
         wav_name_list,
+        corpus_name_list,
+        mos_list,
+        prob_list,
+        judge_id_list,
         records,
         **kwargs,
     ):
+        features_len = torch.IntTensor([len(feat) for feat in features]).to(device=features[0].device)
 
-        features = torch.stack(features)
+        features = pad_sequence(features, batch_first=True)
         features = self.connector(features)
 
-        uttr_scores = []
-        bias_scores = []
-        if mode == "train":
-            mos_list = mos_list.to(features.device)
-            segment_judge_ids = segment_judge_ids.to(features.device)
-            opinion_score_list = opinion_score_list.to(features.device)
-            segments_scores, segments_bias_scores = self.model(
-                features, judge_ids=segment_judge_ids
-            )
-            segments_loss = 0
-            uttr_loss = 0
-            bias_loss = 0
-            for i in range(len(prefix_sums) - 1):
-                current_segment_scores = segments_scores[
-                    prefix_sums[i] : prefix_sums[i + 1]
-                ]
-                current_bias_scores = segments_bias_scores[
-                    prefix_sums[i] : prefix_sums[i + 1]
-                ]
-                uttr_score = current_segment_scores.mean(dim=-1)
-                uttr_scores.append(uttr_score.detach().cpu())
-                bias_score = current_bias_scores.mean(dim=-1)
-                bias_scores.append(bias_score.detach().cpu())
-                segments_loss += self.objective(current_segment_scores, mos_list[i])
-                uttr_loss += self.objective(uttr_score, mos_list[i])
-                bias_loss += self.objective(bias_score, opinion_score_list[i])
-            segments_loss /= len(prefix_sums) - 1
-            uttr_loss /= len(prefix_sums) - 1
-            bias_loss /= len(prefix_sums) - 1
-            loss = (
-                self.segment_weight * segments_loss
-                + self.bias_weight * bias_loss
-                + uttr_loss
-            )
+        prob_list = torch.FloatTensor(prob_list).to(features.device)
+        mos_list = torch.FloatTensor(mos_list).to(features.device)
+        judge_id_list = torch.LongTensor(judge_id_list).to(features.device)
 
-            # for i in range(5):
-            #     print(uttr_scores[i], bias_scores[i])
+        reg_scores, logits = self.model(features, features_len, judge_id_list)
 
-            records["segment loss"].append(segments_loss.item())
-            records["utterance loss"].append(uttr_loss.item())
-            records["bias loss"].append(bias_loss.item())
+        if mode == "train" or mode == "dev":
+            reg_loss = self.regression_objective(reg_scores, mos_list)
+            class_loss = self.classification_objective(logits, prob_list)
+            loss = self.regression_weight * reg_loss + self.classification_weight * class_loss
+
+            records["regression loss"].append(reg_loss.item())
+            records["classification loss"].append(class_loss.item())
             records["total loss"].append(loss.item())
 
-            records["pred_scores"] += uttr_scores
-            records["true_scores"] += mos_list.detach().cpu().tolist()
+        class_scores = torch.matmul(F.softmax(logits, dim=1), torch.linspace(1,5,5).to(logits.device))
 
-        if mode == "dev":
-            mos_list = mos_list.to(features.device)
-            segments_scores = self.model(features)
-            segments_loss = 0
-            uttr_loss = 0
-            for i in range(len(prefix_sums) - 1):
-                current_segment_scores = segments_scores[
-                    prefix_sums[i] : prefix_sums[i + 1]
-                ]
-                uttr_score = current_segment_scores.mean(dim=-1)
-                uttr_scores.append(uttr_score.detach().cpu())
-                segments_loss += self.objective(current_segment_scores, mos_list[i])
-                uttr_loss += self.objective(uttr_score, mos_list[i])
-            segments_loss /= len(prefix_sums) - 1
-            uttr_loss /= len(prefix_sums) - 1
-            loss = segments_loss + uttr_loss
+        reg_scores = reg_scores.detach().cpu().tolist()
+        class_scores = class_scores.detach().cpu().tolist()  
+        mean_scores = (np.array(class_scores) + np.array(reg_scores)) / 2
+        mos_list = mos_list.detach().cpu().tolist()
 
-            records["total loss"].append(loss.item())
+        for record_name, score_list in zip(self.record_names, [mean_scores, reg_scores, class_scores]):
+            if len(records[record_name]) == 0:
+                for _ in range(3):
+                    records[record_name].append(defaultdict(lambda: defaultdict(list)))
 
-            records["pred_scores"] += uttr_scores
-            records["true_scores"] += mos_list.detach().cpu().tolist()
-
-            records["wav_names"] += wav_name_list
-
-        if mode == "test":
-            segments_scores = self.model(features)
-
-            for i in range(len(prefix_sums) - 1):
-                current_segment_scores = segments_scores[
-                    prefix_sums[i] : prefix_sums[i + 1]
-                ]
-                uttr_score = current_segment_scores.mean(dim=-1)
-                uttr_scores.append(uttr_score.detach().cpu())
-
-            records["pred_scores"] += uttr_scores
-            records["true_scores"] += mos_list.detach().cpu().tolist()
-
-            records["wav_names"] += wav_name_list
-        
-
-
-        if len(records["system"]) == 0:
-            records["system"].append(defaultdict(list))
-        for i in range(len(system_name_list)):
-            records["system"][0][system_name_list[i]].append(uttr_scores[i].tolist())
+            for corpus_name, system_name, wav_name, score, mos in zip(corpus_name_list, system_name_list, wav_name_list, score_list, mos_list):
+                records[record_name][PRED_SCORE_IDX][corpus_name][system_name].append(score)
+                records[record_name][TRUE_SCORE_IDX][corpus_name][system_name].append(mos)
+                records[record_name][WAV_NAME_IDX][corpus_name][system_name].append(wav_name)
 
         if mode == "train":
             return loss
@@ -227,134 +290,135 @@ class DownstreamExpert(nn.Module):
     ):
         save_names = []
 
-        # logging loss
-
-        if mode == "train":
-            avg_uttr_loss = torch.FloatTensor(records["utterance loss"]).mean().item()
-            avg_frame_loss = torch.FloatTensor(records["segment loss"]).mean().item()
-            avg_bias_loss = torch.FloatTensor(records["bias loss"]).mean().item()
-
+        
+        # -------------------------logging loss-------------------------------
+        if mode == "train" or mode == "dev":
+            avg_total_loss = np.mean(records["total loss"])
             logger.add_scalar(
-                f"voiceMOS/{mode}-utterance loss",
-                avg_uttr_loss,
-                global_step=global_step,
-            )
-            logger.add_scalar(
-                f"voiceMOS/{mode}-segment loss",
-                avg_frame_loss,
-                global_step=global_step,
-            )
-            logger.add_scalar(
-                f"voiceMOS/{mode}-bias loss",
-                avg_bias_loss,
+                f"Total-loss/{mode}",
+                avg_total_loss,
                 global_step=global_step,
             )
 
-        avg_total_loss = torch.FloatTensor(records["total loss"]).mean().item()
+            avg_reg_loss = np.mean(records["regression loss"])
+            logger.add_scalar(
+                f"Regression-loss/{mode}",
+                avg_reg_loss,
+                global_step=global_step,
+            )
 
-        logger.add_scalar(
-            f"voiceMOS/{mode}-total loss",
-            avg_total_loss,
-            global_step=global_step,
-        )
+            avg_class_loss = np.mean(records["classification loss"])
+            logger.add_scalar(
+                f"Classification-loss/{mode}",
+                avg_class_loss,
+                global_step=global_step,
+            )
+        # Create Post projector
+        if mode == "train_eval":
+            for record_name in self.record_names:
+                all_pred_score_list = []
+                all_true_score_list = []
+                for corpus_name in self.datarc['corpus_names']:
+                    for system_name in list(records[record_name][TRUE_SCORE_IDX][corpus_name].keys()):
+                        all_pred_score_list += records[record_name][PRED_SCORE_IDX][corpus_name][system_name]
+                        all_true_score_list += records[record_name][TRUE_SCORE_IDX][corpus_name][system_name]
 
-        # logging Utterance-level MSE, LCC, SRCC
-
+                self.post_projector[record_name] = LinearRegression().fit(np.array(all_pred_score_list).reshape(-1, 1), np.array(all_true_score_list))
+        # -----------------------Check best checkpoint--------------------------
         if mode == "dev":
-            # some evaluation-only processing, eg. decoding
-            all_pred_scores = records["pred_scores"]
-            all_true_scores = records["true_scores"]
-            all_pred_scores = np.array(all_pred_scores)
-            all_true_scores = np.array(all_true_scores)
-            MSE = np.mean((all_true_scores - all_pred_scores) ** 2)
-            logger.add_scalar(
-                f"voiceMOS/{mode}-Utterance level MSE",
-                MSE,
-                global_step=global_step,
-            )
-            pearson_rho, _ = pearsonr(all_true_scores, all_pred_scores)
-            logger.add_scalar(
-                f"voiceMOS/{mode}-Utterance level LCC",
-                pearson_rho,
-                global_step=global_step,
-            )
-            spearman_rho, _ = spearmanr(all_true_scores.T, all_pred_scores.T)
-            logger.add_scalar(
-                f"voiceMOS/{mode}-Utterance level SRCC",
-                spearman_rho,
-                global_step=global_step,
-            )
+            avg_total_loss = np.mean(records["total loss"])
+            if avg_total_loss < self.best["dev_loss"]:
+                self.best["dev_loss"] = avg_total_loss
+                self.best["step"] = global_step
+                save_names.append(f"best.ckpt")
+                tqdm.write(f"[Step {global_step}] valid loss = {avg_total_loss:.4f}, Saving checkpoint")
 
-            tqdm.write(f"[{mode}] Utterance-level MSE  = {MSE:.4f}")
-            tqdm.write(f"[{mode}] Utterance-level LCC  = {pearson_rho:.4f}")
-            tqdm.write(f"[{mode}] Utterance-level SRCC = {spearman_rho:.4f}")
+        # ------------------------Calculate metrics------------------------------
+        if mode == "train_eval" or mode == "dev":
+            for record_name in self.record_names:
+                for corpus_name in self.datarc['corpus_names']:
 
-            # select which system mos to use
-            system_level_mos = self.system_mos
+                    # -------Load utterance-level and system-level scores--------
+                    corpus_pred_score_list = []
+                    corpus_true_score_list = []
+                    corpus_wav_name_list = []
+                    corpus_system_pred_score_list = []
+                    corpus_system_true_score_list = []
 
-            # logging System-level MSE, LCC, SRCC
-            all_system_pred_scores = []
-            all_system_true_scores = []
+                    for system_name in list(records[record_name][TRUE_SCORE_IDX][corpus_name].keys()):
+                        corpus_pred_score_list += records[record_name][PRED_SCORE_IDX][corpus_name][system_name]
+                        corpus_true_score_list += records[record_name][TRUE_SCORE_IDX][corpus_name][system_name]
+                        corpus_wav_name_list += records[record_name][WAV_NAME_IDX][corpus_name][system_name]
+                        corpus_system_pred_score_list.append(np.mean(records[record_name][PRED_SCORE_IDX][corpus_name][system_name]))
+                        corpus_system_true_score_list.append(np.mean(records[record_name][TRUE_SCORE_IDX][corpus_name][system_name]))
+                    
+                    # ----------------Calculate utterance level metric------------ 
+                    corpus_pred_scores = np.array(corpus_pred_score_list)
+                    corpus_true_scores = np.array(corpus_true_score_list)
 
-            for key, values in records["system"][0].items():
-                all_system_pred_scores.append(np.mean(values))
-                all_system_true_scores.append(system_level_mos[system_level_mos['system_ID']==key]['mean'].values[0])
+                    corpus_pred_scores = self.post_projector[record_name].predict(corpus_pred_scores.reshape(-1, 1)).reshape(-1)
+                    MSE = np.mean((corpus_true_scores - corpus_pred_scores) ** 2)
+                    LCC, _ = pearsonr(corpus_true_scores, corpus_pred_scores)
+                    SRCC, _ = spearmanr(corpus_true_scores.T, corpus_pred_scores.T)
 
-            all_system_pred_scores = np.array(all_system_pred_scores)
-            all_system_true_scores = np.array(all_system_true_scores)
+                    for metric in ['MSE', 'LCC', 'SRCC']:
+                        logger.add_scalar(
+                            f"{corpus_name}-Utterance-level-{record_name}/{mode}-{metric}",
+                            eval(metric),
+                            global_step=global_step,
+                        )
 
-            MSE = np.mean((all_system_true_scores - all_system_pred_scores) ** 2)
-            pearson_rho, _ = pearsonr(all_system_true_scores, all_system_pred_scores)
-            spearman_rho, _ = spearmanr(all_system_true_scores, all_system_pred_scores)
 
-            tqdm.write(f"[{mode}] System-level MSE  = {MSE:.4f}")
-            tqdm.write(f"[{mode}] System-level LCC  = {pearson_rho:.4f}")
-            tqdm.write(f"[{mode}] System-level SRCC = {spearman_rho:.4f}")
+                    # ----------------Calculate system level metric----------------
+                    corpus_system_pred_scores = np.array(corpus_system_pred_score_list)
+                    corpus_system_true_scores = np.array(corpus_system_true_score_list)
 
-            logger.add_scalar(
-                f"voiceMOS/{mode}-System level MSE",
-                MSE,
-                global_step=global_step,
-            )
-            logger.add_scalar(
-                f"voiceMOS/{mode}-System level LCC",
-                pearson_rho,
-                global_step=global_step,
-            )
-            logger.add_scalar(
-                f"voiceMOS/{mode}-System level SRCC",
-                spearman_rho,
-                global_step=global_step,
-            )
+                    corpus_system_pred_scores = self.post_projector[record_name].predict(corpus_system_pred_scores.reshape(-1, 1)).reshape(-1)
 
-        # save model
-        if mode == "dev":
-            if avg_total_loss < self.best_scores["dev_MSE"]:
-                self.best_scores["dev_MSE"] = avg_total_loss
-                save_names.append(f"{mode}-MSE-best.ckpt")
-                df = pd.DataFrame(list(zip(records["wav_names"], np.array(records["pred_scores"]))))
-                df.to_csv(Path(self.expdir, "MSE-best-answer.txt"), header=None, index=None)
-                tqdm.write(f"writing answer.txt")
+                    MSE = np.mean((corpus_system_true_scores - corpus_system_pred_scores) ** 2)
+                    LCC, _ = pearsonr(corpus_system_true_scores, corpus_system_pred_scores)
+                    SRCC, _ = spearmanr(corpus_system_true_scores, corpus_system_pred_scores)
 
-            if pearson_rho > self.best_scores["dev_LCC"]:
-                self.best_scores["dev_LCC"] = pearson_rho
-                save_names.append(f"{mode}-LCC-best.ckpt")
-                df = pd.DataFrame(list(zip(records["wav_names"], np.array(records["pred_scores"]))))
-                df.to_csv(Path(self.expdir, "LCC-best-answer.txt"), header=None, index=None)
-                tqdm.write(f"writing answer.txt")
+                    for metric in ['MSE', 'LCC', 'SRCC']:
+                        logger.add_scalar(
+                            f"{corpus_name}-System-level-{record_name}/{mode}-{metric}",
+                            eval(metric),
+                            global_step=global_step,
+                        )
 
-            if spearman_rho > self.best_scores["dev_SRCC"]:
-                self.best_scores["dev_SRCC"] = spearman_rho
-                save_names.append(f"{mode}-SRCC-best.ckpt")
-                df = pd.DataFrame(list(zip(records["wav_names"], np.array(records["pred_scores"]))))
-                df.to_csv(Path(self.expdir, "SRCC-best-answer.txt"), header=None, index=None)
-                tqdm.write(f"writing answer.txt")
+                    # -------------------------Save best scores--------------------- 
+                    if mode == "dev":
+                        for metric, operator in zip(['MSE', 'LCC', 'SRCC'], ["<", ">", ">"]):
+                            value = eval(metric)
+                            best_value = self.best[corpus_name][metric]
+                            if eval(f"{value} {operator} {best_value}"):
+                                tqdm.write(f"[Best score] [Step {global_step}] [{corpus_name}] [{record_name}] System-level-{metric}={value:.4f}")
+                                with open(Path(self.expdir, "best_logger.txt"), "a+") as f:
+                                    f.write(f"[Best score] [Step {global_step}] [{corpus_name}] [{record_name}] System-level-{metric}={value:.4f}\n")
+                                self.best[corpus_name][metric] = value
+                    
+                        with open(Path(self.expdir, "best.pkl"), "w") as f:
+                            json.dump(self.best, f)
 
-        if mode == "test":
-            df = pd.DataFrame(list(zip(records["wav_names"], np.array(records["pred_scores"]))))
-            df.to_csv(Path(self.expdir, "answer.txt"), header=None, index=None)
+                        
+
+
+        # -----------------------Save prediction files-------------------
+        if mode == "dev" or mode == "test" or mode == "train_eval":
+            for record_name in self.record_names:
+                for corpus_name in self.datarc['corpus_names']:
+                    all_pred_score_list = []
+                    all_wav_name_list = []
+                    for system_name in list(records[record_name][PRED_SCORE_IDX][corpus_name].keys()):
+                        all_pred_score_list += records[record_name][PRED_SCORE_IDX][corpus_name][system_name]
+                        all_wav_name_list += records[record_name][WAV_NAME_IDX][corpus_name][system_name]
+
+                    all_pred_score_list = list(self.post_projector[record_name].predict(np.array(all_pred_score_list).reshape(-1, 1)).reshape(-1))
+
+                    df = pd.DataFrame(list(zip(all_wav_name_list, all_pred_score_list)))
+                    df.to_csv(Path(self.expdir, corpus_name, record_name, f"{mode}-steps-{global_step}-answer.txt"), header=None, index=None)
+
             
-
 
         return save_names
 

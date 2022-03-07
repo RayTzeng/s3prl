@@ -1,14 +1,16 @@
 runner:
   total_steps: 20000
   gradient_clipping: 5
-  gradient_accumulate_steps: 8
+  gradient_accumulate_steps: 16
 
   log_step: 100
-  eval_step: 500
-  save_step: 500
+  eval_step: 100
+  save_step: 100
   max_keep: 1
   eval_dataloaders:
+    - train_eval
     - dev
+    - test
 
 optimizer:
   name: Adam
@@ -23,13 +25,29 @@ scheduler:
 downstream_expert:
   datarc:
     num_workers: 8
-    train_batch_size: 4
-    eval_batch_size: 4
-    voiceMOS_path: /home/raytz/Disk/voiceMOS/phase1-main/DATA
+    train_batch_size: 2
+    eval_batch_size: 2
+    data_folders: ['/home/raytz/Disk/voiceMOS/phase1-main/DATA', '/home/raytz/Disk/voiceMOS/phase1-ood/DATA']
+    corpus_names: ['voiceMOS_main', 'voiceMOS_ood']
+    test_wav_folders: []
+    train_mos_list_path: sets/train_mos_list.txt
+    train_ld_score_list_path: sets/TRAINSET
+    val_mos_list_path: sets/val_mos_list.txt
+    val_ld_score_list_path: sets/DEVSET
+    test_mos_list_path: sets/val_mos_list.txt
+    ld_score_bool: False
+    idtable: ""
+    perturb:
+      mode: 'random'
+      types: ['speed', 'speed', 'pitch', 'pitch', 'tempo', 'tempo']               # ['speed', 'trim', 'pad', 'pitch', 'tempo']
+      ratios: [0.95, 1.05, 100, -100, 0.95, 1.05]              # 
 
   modelrc:
     projector_dim: 768
-    clipping: True # If true, the model output will be restrict to the interval [1,5] using Tanh
-    attention_pooling: True
-    segment_weight: 1
-    bias_weight: 1
+    regression_objective: MSELoss
+    dim: [256, 256]
+    dropout: [0, 0]
+    activation: ReLU
+    pooling_name: AttentivePooling
+    classification_weight: 1
+    regression_weight: 1
