@@ -129,7 +129,9 @@ class DownstreamExpert(nn.Module):
         # Define Evaluation Metrics
         if Path(self.expdir, "best.pkl").is_file():
             with open(Path(self.expdir, "best.pkl"), "r") as f:
-                self.best = f.read()
+                self.best = json.load(f)
+            print("Found existing best score records")
+            print(self.best)
         else:
             for corpus_name in self.datarc["corpus_names"]:
                 self.best[corpus_name] = {
