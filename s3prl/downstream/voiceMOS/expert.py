@@ -316,16 +316,17 @@ class DownstreamExpert(nn.Module):
                 global_step=global_step,
             )
         # Create Post projector
-        if mode == "train_eval":
-            for record_name in self.record_names:
-                all_pred_score_list = []
-                all_true_score_list = []
-                for corpus_name in self.datarc['corpus_names']:
-                    for system_name in list(records[record_name][TRUE_SCORE_IDX][corpus_name].keys()):
-                        all_pred_score_list += records[record_name][PRED_SCORE_IDX][corpus_name][system_name]
-                        all_true_score_list += records[record_name][TRUE_SCORE_IDX][corpus_name][system_name]
+        if self.modelrc["post_processing"]:
+            if mode == "train_eval":
+                for record_name in self.record_names:
+                    all_pred_score_list = []
+                    all_true_score_list = []
+                    for corpus_name in self.datarc['corpus_names']:
+                        for system_name in list(records[record_name][TRUE_SCORE_IDX][corpus_name].keys()):
+                            all_pred_score_list += records[record_name][PRED_SCORE_IDX][corpus_name][system_name]
+                            all_true_score_list += records[record_name][TRUE_SCORE_IDX][corpus_name][system_name]
 
-                self.post_projector[record_name] = LinearRegression().fit(np.array(all_pred_score_list).reshape(-1, 1), np.array(all_true_score_list))
+                    self.post_projector[record_name] = LinearRegression().fit(np.array(all_pred_score_list).reshape(-1, 1), np.array(all_true_score_list))
         # -----------------------Check best checkpoint--------------------------
         if mode == "dev":
             avg_total_loss = np.mean(records["total loss"])
@@ -358,7 +359,9 @@ class DownstreamExpert(nn.Module):
                     corpus_pred_scores = np.array(corpus_pred_score_list)
                     corpus_true_scores = np.array(corpus_true_score_list)
 
-                    corpus_pred_scores = self.post_projector[record_name].predict(corpus_pred_scores.reshape(-1, 1)).reshape(-1)
+                    if self.modelrc["post_processing"]:
+                        corpus_pred_scores = self.post_projector[record_name].predict(corpus_pred_scores.reshape(-1, 1)).reshape(-1)
+                    
                     MSE = np.mean((corpus_true_scores - corpus_pred_scores) ** 2)
                     LCC, _ = pearsonr(corpus_true_scores, corpus_pred_scores)
                     SRCC, _ = spearmanr(corpus_true_scores.T, corpus_pred_scores.T)
@@ -375,7 +378,8 @@ class DownstreamExpert(nn.Module):
                     corpus_system_pred_scores = np.array(corpus_system_pred_score_list)
                     corpus_system_true_scores = np.array(corpus_system_true_score_list)
 
-                    corpus_system_pred_scores = self.post_projector[record_name].predict(corpus_system_pred_scores.reshape(-1, 1)).reshape(-1)
+                    if self.modelrc["post_processing"]:
+                        corpus_system_pred_scores = self.post_projector[record_name].predict(corpus_system_pred_scores.reshape(-1, 1)).reshape(-1)
 
                     MSE = np.mean((corpus_system_true_scores - corpus_system_pred_scores) ** 2)
                     LCC, _ = pearsonr(corpus_system_true_scores, corpus_system_pred_scores)
@@ -398,6 +402,9 @@ class DownstreamExpert(nn.Module):
                                 with open(Path(self.expdir, "best_logger.txt"), "a+") as f:
                                     f.write(f"[Best score] [Step {global_step}] [{corpus_name}] [{record_name}] System-level-{metric}={value:.4f}\n")
                                 self.best[corpus_name][metric] = value
+                                
+                                if metric == 'SRCC':
+                                    save_names.append(f"{corpus_name}-System-SRCC-best.ckpt")
                     
                         with open(Path(self.expdir, "best.pkl"), "w") as f:
                             json.dump(self.best, f)
@@ -415,7 +422,8 @@ class DownstreamExpert(nn.Module):
                         all_pred_score_list += records[record_name][PRED_SCORE_IDX][corpus_name][system_name]
                         all_wav_name_list += records[record_name][WAV_NAME_IDX][corpus_name][system_name]
 
-                    all_pred_score_list = list(self.post_projector[record_name].predict(np.array(all_pred_score_list).reshape(-1, 1)).reshape(-1))
+                    if self.modelrc["post_processing"]:
+                        all_pred_score_list = list(self.post_projector[record_name].predict(np.array(all_pred_score_list).reshape(-1, 1)).reshape(-1))
 
                     df = pd.DataFrame(list(zip(all_wav_name_list, all_pred_score_list)))
                     df.to_csv(Path(self.expdir, corpus_name, record_name, f"{mode}-steps-{global_step}-answer.txt"), header=None, index=None)

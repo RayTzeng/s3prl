@@ -34,7 +34,7 @@ downstream_expert:
     train_ld_score_list_path: sets/TRAINSET
     val_mos_list_path: sets/val_mos_list.txt
     val_ld_score_list_path: sets/DEVSET
-    test_mos_list_path: sets/val_mos_list.txt
+    test_mos_list_path: sets/test_mos_list.txt
     ld_score_bool: False
     idtable: ""
     perturb:
@@ -51,3 +51,4 @@ downstream_expert:
     pooling_name: AttentivePooling
     classification_weight: 1
     regression_weight: 1
+    post_processing: True
