@@ -27,7 +27,7 @@ downstream_expert:
     num_workers: 8
     train_batch_size: 2
     eval_batch_size: 2
-    data_folders: ['/home/raytz/Disk/voiceMOS/phase1-main/DATA', '/home/raytz/Disk/voiceMOS/phase1-ood/DATA']
+    data_folders: ['/livingrooms/wiz94156/voiceMOS/phase1-main/DATA', '/livingrooms/wiz94156/voiceMOS/phase1-ood/DATA']
     corpus_names: ['voiceMOS_main', 'voiceMOS_ood']
     test_wav_folders: []
     train_mos_list_path: sets/train_mos_list.txt
